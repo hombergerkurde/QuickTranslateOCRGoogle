@@ -1,54 +1,72 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <Vision/Vision.h>
+#import <objc/runtime.h>
 
 static NSString * const kPrefsDomain = @"com.hombergerkurde.quicktranslate";
-static const NSInteger kQTButtonTag = 987654;
+static const NSInteger kQTInlineBtnTag = 984201;
 static const NSInteger kQTHUDTag = 998877;
+static const NSInteger kQTSileoBtnTag = 884422;
+static const char *kQTTextAssocKey = "kQTTextAssocKey";
 
-#pragma mark - Prefs (Simple Approach)
+#pragma mark - Target apps
+
+static BOOL QTIsTargetApp(void) {
+    NSString *bid = NSBundle.mainBundle.bundleIdentifier ?: @"";
+    static NSSet<NSString *> *allowed;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        allowed = [NSSet setWithArray:@[
+            @"ph.telegra.Telegraph",
+            @"com.atebits.Tweetie2",
+            @"net.whatsapp.WhatsApp",
+            @"com.hammerandchisel.discord",
+            @"com.facebook.Facebook",
+            @"com.burbn.instagram",
+            @"org.coolstar.SileoStore"
+        ]];
+    });
+    return [allowed containsObject:bid];
+}
+
+static BOOL QTIsSileo(void) {
+    return [NSBundle.mainBundle.bundleIdentifier ?: @"" isEqualToString:@"org.coolstar.SileoStore"];
+}
+
+#pragma mark - Prefs
 
 static NSDictionary *QTGetPrefs(void) {
     NSDictionary *d = [[NSUserDefaults standardUserDefaults] persistentDomainForName:kPrefsDomain];
     return [d isKindOfClass:[NSDictionary class]] ? d : @{};
 }
-
 static NSString *QTGetString(NSString *key, NSString *def) {
     id v = QTGetPrefs()[key];
     return [v isKindOfClass:[NSString class]] ? (NSString *)v : def;
 }
-
 static BOOL QTGetBool(NSString *key, BOOL def) {
     id v = QTGetPrefs()[key];
     return v ? [v boolValue] : def;
 }
 
-#pragma mark - Window / Top VC (iOS 15+ safe)
+#pragma mark - UI helpers
 
 static UIWindow *QTGetKeyWindow(void) {
     UIApplication *app = UIApplication.sharedApplication;
-
     if (@available(iOS 13.0, *)) {
         for (UIScene *scene in app.connectedScenes) {
             if (scene.activationState != UISceneActivationStateForegroundActive) continue;
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-
             UIWindowScene *ws = (UIWindowScene *)scene;
-            for (UIWindow *w in ws.windows) {
-                if (w.isKeyWindow) return w;
-            }
-            if (ws.windows.count > 0) return ws.windows.firstObject;
+            for (UIWindow *w in ws.windows) if (w.isKeyWindow) return w;
+            if (ws.windows.count) return ws.windows.firstObject;
         }
-
         for (UIScene *scene in app.connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
             UIWindowScene *ws = (UIWindowScene *)scene;
-            if (ws.windows.count > 0) return ws.windows.firstObject;
+            if (ws.windows.count) return ws.windows.firstObject;
         }
-
         return nil;
     }
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     return app.keyWindow ?: app.windows.firstObject;
@@ -64,11 +82,8 @@ static UIViewController *QTTopViewController(UIViewController *vc) {
 }
 
 static void QTShowAlert(NSString *title, NSString *message) {
-    UIWindow *w = QTGetKeyWindow();
-    if (!w) return;
-    UIViewController *top = QTTopViewController(w.rootViewController);
-    if (!top) return;
-
+    UIWindow *w = QTGetKeyWindow(); if (!w) return;
+    UIViewController *top = QTTopViewController(w.rootViewController); if (!top) return;
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:(title ?: @"")
                                                                 message:(message ?: @"")
                                                          preferredStyle:UIAlertControllerStyleAlert];
@@ -77,10 +92,8 @@ static void QTShowAlert(NSString *title, NSString *message) {
 }
 
 static void QTShowResultPopup(NSString *translated) {
-    UIWindow *w = QTGetKeyWindow();
-    if (!w) return;
-    UIViewController *top = QTTopViewController(w.rootViewController);
-    if (!top) return;
+    UIWindow *w = QTGetKeyWindow(); if (!w) return;
+    UIViewController *top = QTTopViewController(w.rootViewController); if (!top) return;
 
     NSString *msg = translated ?: @"";
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Übersetzung"
@@ -93,18 +106,14 @@ static void QTShowResultPopup(NSString *translated) {
     [top presentViewController:ac animated:YES completion:nil];
 }
 
-#pragma mark - HUD
-
 static void QTHideHUD(void) {
-    UIWindow *w = QTGetKeyWindow();
-    if (!w) return;
+    UIWindow *w = QTGetKeyWindow(); if (!w) return;
     UIView *hud = [w viewWithTag:kQTHUDTag];
     if (hud) [hud removeFromSuperview];
 }
 
 static void QTShowHUD(NSString *text) {
-    UIWindow *w = QTGetKeyWindow();
-    if (!w) return;
+    UIWindow *w = QTGetKeyWindow(); if (!w) return;
     QTHideHUD();
 
     UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -130,51 +139,41 @@ static void QTShowHUD(NSString *text) {
     [w addSubview:lbl];
 }
 
-#pragma mark - Screenshot + OCR normalization
-
-static UIImage *QTNormalizeForOCR(UIImage *src) {
-    if (!src) return nil;
-
-    CGFloat maxDim = 1280.0;
-    CGFloat w = src.size.width;
-    CGFloat h = src.size.height;
-    CGFloat m = MAX(w, h);
-
-    CGFloat scale = 1.0;
-    if (m > maxDim) scale = maxDim / m;
-
-    CGSize newSize = CGSizeMake(floor(w * scale), floor(h * scale));
-    if (newSize.width < 1 || newSize.height < 1) return src;
-
-    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-    fmt.opaque = YES;   // stable pixel format
-    fmt.scale = 1.0;    // avoid 3x huge images
-
-    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:newSize format:fmt];
-    UIImage *out = [r imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
-        [src drawInRect:(CGRect){CGPointZero, newSize}];
-    }];
-    return out;
-}
+#pragma mark - Screenshot + OCR (fallback)
 
 static UIImage *QTScreenSnapshot(void) {
     UIWindow *w = QTGetKeyWindow();
     if (!w) return nil;
-
     CGSize size = w.bounds.size;
+
     UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
     fmt.opaque = YES;
     fmt.scale = 1.0;
 
     UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:fmt];
-    UIImage *img = [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
-        // more robust than drawViewHierarchy (reduces Vision -1 failures on overlays)
+    return [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
         [w.layer renderInContext:UIGraphicsGetCurrentContext()];
     }];
-    return img;
 }
 
-#pragma mark - OCR (Vision)
+static UIImage *QTNormalizeForOCR(UIImage *src) {
+    if (!src) return nil;
+    CGFloat maxDim = 1280.0;
+    CGFloat w = src.size.width, h = src.size.height;
+    CGFloat m = MAX(w, h);
+    CGFloat scale = (m > maxDim) ? (maxDim / m) : 1.0;
+    CGSize newSize = CGSizeMake(floor(w * scale), floor(h * scale));
+    if (newSize.width < 1 || newSize.height < 1) return src;
+
+    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+    fmt.opaque = YES;
+    fmt.scale = 1.0;
+
+    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:newSize format:fmt];
+    return [r imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
+        [src drawInRect:(CGRect){CGPointZero, newSize}];
+    }];
+}
 
 static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError *err)) {
     UIImage *norm = QTNormalizeForOCR(image);
@@ -188,12 +187,10 @@ static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError 
         NSMutableArray<NSString *> *lines = [NSMutableArray new];
         for (VNRecognizedTextObservation *obs in request.results) {
             VNRecognizedText *best = [[obs topCandidates:1] firstObject];
-            if (best.string.length > 0) [lines addObject:best.string];
+            if (best.string.length) [lines addObject:best.string];
         }
-        NSString *joined = [lines componentsJoinedByString:@"\n"];
-        if (completion) completion(joined, nil);
+        if (completion) completion([lines componentsJoinedByString:@"\n"], nil);
     }];
-
     req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
     req.usesLanguageCorrection = YES;
 
@@ -205,7 +202,7 @@ static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError 
     });
 }
 
-#pragma mark - Network helpers
+#pragma mark - Providers (LibreTranslate + DeepL + Microsoft + Google)
 
 static NSURLSession *QTSession(void) {
     NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
@@ -217,18 +214,15 @@ static NSURLSession *QTSession(void) {
 static NSString *QTHTTPErrorMessage(NSHTTPURLResponse *http, id jsonObj, NSString *fallback) {
     NSInteger code = http ? http.statusCode : 0;
     NSString *msg = fallback ?: @"Fehler";
-
     if ([jsonObj isKindOfClass:[NSDictionary class]]) {
-        NSString *e = ((NSDictionary *)jsonObj)[@"error"];
-        if ([e isKindOfClass:[NSString class]] && e.length) msg = e;
         NSString *m = ((NSDictionary *)jsonObj)[@"message"];
         if ([m isKindOfClass:[NSString class]] && m.length) msg = m;
+        NSString *e = ((NSDictionary *)jsonObj)[@"error"];
+        if ([e isKindOfClass:[NSString class]] && e.length) msg = e;
     }
     if (code > 0) msg = [NSString stringWithFormat:@"%@ (HTTP %ld)", msg, (long)code];
     return msg;
 }
-
-#pragma mark - Providers
 
 static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
     NSString *base = (serverURL.length ? serverURL : @"https://translate.cutie.dating");
@@ -277,7 +271,6 @@ static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *t
 
 static void QTTranslate_DeepL(NSString *authKey, BOOL pro, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
     if (authKey.length == 0) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:201 userInfo:@{NSLocalizedDescriptionKey:@"DeepL Key fehlt"}]); return; }
-
     NSString *host = pro ? @"https://api.deepl.com/v2/translate" : @"https://api-free.deepl.com/v2/translate";
     NSURL *url = [NSURL URLWithString:host];
     if (!url) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:202 userInfo:@{NSLocalizedDescriptionKey:@"DeepL URL ungültig"}]); return; }
@@ -287,7 +280,8 @@ static void QTTranslate_DeepL(NSString *authKey, BOOL pro, NSString *text, NSStr
     tg = [tg stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (tg.length == 2) tg = tg.uppercaseString;
 
-    NSString *bodyStr = [NSString stringWithFormat:@"text=%@&target_lang=%@", q,
+    NSString *bodyStr = [NSString stringWithFormat:@"text=%@&target_lang=%@",
+                         q,
                          [tg stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"DE"];
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
@@ -354,6 +348,7 @@ static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSSt
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:(int)http.statusCode userInfo:@{NSLocalizedDescriptionKey: msg}]);
             return;
         }
+
         if (parseErr || ![obj isKindOfClass:[NSArray class]] || ((NSArray *)obj).count == 0) {
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:303 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft Antwort ungültig"}]);
             return;
@@ -383,7 +378,6 @@ static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *tar
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod = @"POST";
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-
     NSDictionary *payload = @{@"q": (text ?: @""), @"target": (target ?: @"de"), @"format": @"text"};
     req.HTTPBody = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
 
@@ -399,6 +393,7 @@ static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *tar
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:(int)http.statusCode userInfo:@{NSLocalizedDescriptionKey: msg}]);
             return;
         }
+
         if (parseErr || ![obj isKindOfClass:[NSDictionary class]]) {
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:403 userInfo:@{NSLocalizedDescriptionKey:@"Google Antwort ungültig"}]);
             return;
@@ -417,21 +412,20 @@ static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *tar
     }] resume];
 }
 
-#pragma mark - Provider chain + fallback
+#pragma mark - Provider chain
 
 static NSArray<NSString *> *QTProviderChain(void) {
     NSString *p = QTGetString(@"providerPrimary", @"libre");
     NSString *f1 = QTGetString(@"providerFallback1", @"deepl");
     NSString *f2 = QTGetString(@"providerFallback2", @"microsoft");
-
-    NSMutableArray<NSString *> *arr = [NSMutableArray new];
+    NSMutableArray *arr = [NSMutableArray new];
     if (p.length) [arr addObject:p];
     if (f1.length && ![f1 isEqualToString:@"off"]) [arr addObject:f1];
     if (f2.length && ![f2 isEqualToString:@"off"]) [arr addObject:f2];
     return arr;
 }
 
-static BOOL QTProviderIsConfigured(NSString *provider) {
+static BOOL QTProviderConfigured(NSString *provider) {
     if ([provider isEqualToString:@"libre"]) return YES;
     if ([provider isEqualToString:@"deepl"]) return QTGetString(@"deeplKey", @"").length > 0;
     if ([provider isEqualToString:@"microsoft"]) return QTGetString(@"msKey", @"").length > 0;
@@ -471,15 +465,13 @@ static void QTTranslate_WithFallbacks(NSArray<NSString *> *chain, NSInteger idx,
         if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:998 userInfo:@{NSLocalizedDescriptionKey:@"Alle Anbieter fehlgeschlagen (oder keine Keys gesetzt)."}]);
         return;
     }
-
     NSString *p = chain[idx];
-    if (!QTProviderIsConfigured(p)) {
+    if (!QTProviderConfigured(p)) {
         QTTranslate_WithFallbacks(chain, idx + 1, text, target, completion);
         return;
     }
-
     QTTranslate_WithProvider(p, text, target, ^(NSString *translated, NSError *err) {
-        if (translated.length > 0 && !err) {
+        if (translated.length && !err) {
             if (completion) completion(translated, nil);
             return;
         }
@@ -487,19 +479,43 @@ static void QTTranslate_WithFallbacks(NSArray<NSString *> *chain, NSInteger idx,
     });
 }
 
-#pragma mark - Main flow
+#pragma mark - Main translate functions
 
 static BOOL gQTBusy = NO;
 
-static void QTTranslateVisibleScreen(void) {
+static void QTTranslateText(NSString *text) {
     if (gQTBusy) return;
     if (!QTGetBool(@"enabled", YES)) return;
-    gQTBusy = YES;
+
+    NSString *trim = [(text ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trim.length == 0) { QTShowAlert(@"QuickTranslate", @"Kein Text gefunden."); return; }
+
+    const NSUInteger kMaxChars = 1400;
+    if (trim.length > kMaxChars) trim = [trim substringToIndex:kMaxChars];
 
     NSString *target = QTGetString(@"targetLang", @"de");
     target = [target stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (target.length == 0) target = @"de";
 
+    gQTBusy = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Übersetze…"); });
+
+    NSArray *chain = QTProviderChain();
+    QTTranslate_WithFallbacks(chain, 0, trim, target, ^(NSString *translated, NSError *err) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            QTHideHUD();
+            if (err) QTShowAlert(@"Übersetzung fehlgeschlagen", err.localizedDescription ?: @"Unbekannter Fehler");
+            else QTShowResultPopup(translated);
+        });
+        gQTBusy = NO;
+    });
+}
+
+static void QTTranslateVisibleScreenOCR(void) {
+    if (gQTBusy) return;
+    if (!QTGetBool(@"enabled", YES)) return;
+
+    gQTBusy = YES;
     dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Erkenne Text…"); });
 
     UIImage *snap = QTScreenSnapshot();
@@ -510,101 +526,156 @@ static void QTTranslateVisibleScreen(void) {
     }
 
     QTRunOCR(snap, ^(NSString *text, NSError *err) {
-        if (err) {
-            dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler"); });
-            gQTBusy = NO;
-            return;
-        }
-
-        NSString *trim = [(text ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (trim.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); QTShowAlert(@"QuickTranslate", @"Kein Text erkannt."); });
-            gQTBusy = NO;
-            return;
-        }
-
-        const NSUInteger kMaxChars = 1400;
-        if (trim.length > kMaxChars) trim = [trim substringToIndex:kMaxChars];
-
-        dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Übersetze…"); });
-
-        NSArray<NSString *> *chain = QTProviderChain();
-        QTTranslate_WithFallbacks(chain, 0, trim, target, ^(NSString *translated, NSError *tErr) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                QTHideHUD();
-                if (tErr) QTShowAlert(@"Übersetzung fehlgeschlagen", tErr.localizedDescription ?: @"Unbekannter Fehler");
-                else QTShowResultPopup(translated);
-            });
-            gQTBusy = NO;
-        });
+        dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); });
+        gQTBusy = NO;
+        if (err) { QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler"); return; }
+        QTTranslateText(text);
     });
 }
 
-#pragma mark - Floating button
+#pragma mark - Text extraction + Inline button
 
-static void QTInstallFloatingButton(void);
+static NSString *QTExtractTextFromView(UIView *v) {
+    if ([v isKindOfClass:[UILabel class]]) {
+        NSString *t = ((UILabel *)v).text;
+        if (t.length) return t;
+    }
+    if ([v isKindOfClass:[UITextView class]]) {
+        NSString *t = ((UITextView *)v).text;
+        if (t.length) return t;
+    }
+    if ([v isKindOfClass:[UITextField class]]) {
+        NSString *t = ((UITextField *)v).text;
+        if (t.length) return t;
+    }
+    for (UIView *sv in v.subviews) {
+        NSString *t = QTExtractTextFromView(sv);
+        if (t.length) return t;
+    }
+    return nil;
+}
 
-@interface UIView (QTDrag)
-- (void)qt_pan:(UIPanGestureRecognizer *)gr;
+@interface UIWindow (QTInlineTap)
+- (void)qt_inlineTap:(UIButton *)sender;
 @end
-@implementation UIView (QTDrag)
-- (void)qt_pan:(UIPanGestureRecognizer *)gr {
-    UIView *v = gr.view;
-    if (!v) return;
-    CGPoint tr = [gr translationInView:v.superview];
-    v.center = CGPointMake(v.center.x + tr.x, v.center.y + tr.y);
-    [gr setTranslation:CGPointZero inView:v.superview];
+
+@implementation UIWindow (QTInlineTap)
+- (void)qt_inlineTap:(UIButton *)sender {
+    NSString *t = objc_getAssociatedObject(sender, kQTTextAssocKey);
+    if (![t isKindOfClass:[NSString class]] || t.length == 0) {
+        QTTranslateVisibleScreenOCR();
+        return;
+    }
+    QTTranslateText(t);
 }
 @end
 
-@interface UIWindow (QTFallbackTap)
-- (void)qt_fallbackTap;
-@end
-@implementation UIWindow (QTFallbackTap)
-- (void)qt_fallbackTap { QTTranslateVisibleScreen(); }
-@end
+static void QTAddInlineButtonToCell(UIView *cellContent) {
+    if (!QTGetBool(@"enabled", YES)) return;
+    if (!cellContent) return;
 
-static void QTInstallFloatingButton(void) {
-    UIWindow *w = QTGetKeyWindow();
-    if (!w) return;
+    NSString *text = QTExtractTextFromView(cellContent);
+    NSString *trim = [(text ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trim.length < 10) return;
 
-    BOOL enabled = QTGetBool(@"enabled", YES);
-    UIView *old = [w viewWithTag:kQTButtonTag];
-
-    if (!enabled) {
-        if (old) [old removeFromSuperview];
-        return;
-    }
-
-    UIButton *btn = (UIButton *)old;
+    UIButton *btn = (UIButton *)[cellContent viewWithTag:kQTInlineBtnTag];
     if (!btn) {
         btn = [UIButton buttonWithType:UIButtonTypeSystem];
-        btn.tag = kQTButtonTag;
+        btn.tag = kQTInlineBtnTag;
         [btn setTitle:@"🌐" forState:UIControlStateNormal];
-        btn.frame = CGRectMake(20, 200, 52, 52);
-        btn.layer.cornerRadius = 26.0;
+        btn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        btn.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.85];
+        btn.layer.cornerRadius = 14.0;
         btn.clipsToBounds = YES;
-        btn.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.92];
 
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:btn action:@selector(qt_pan:)];
-        [btn addGestureRecognizer:pan];
+        UIWindow *w = QTGetKeyWindow();
+        if (w) [btn addTarget:w action:@selector(qt_inlineTap:) forControlEvents:UIControlEventTouchUpInside];
 
-        // reliable tap everywhere
-        [btn addTarget:w action:@selector(qt_fallbackTap) forControlEvents:UIControlEventTouchUpInside];
-
-        [w addSubview:btn];
+        [cellContent addSubview:btn];
     }
 
-    [w bringSubviewToFront:btn];
+    objc_setAssociatedObject(btn, kQTTextAssocKey, trim, OBJC_ASSOCIATION_COPY_NONATOMIC);
+
+    CGFloat pad = 8.0;
+    CGFloat bw = 28.0, bh = 28.0;
+    CGRect b = cellContent.bounds;
+    btn.frame = CGRectMake(MAX(pad, b.size.width - bw - pad),
+                           MAX(pad, b.size.height - bh - pad),
+                           bw, bh);
+    [cellContent bringSubviewToFront:btn];
+}
+
+%hook UITableViewCell
+- (void)layoutSubviews {
+    %orig;
+    if (!QTIsTargetApp()) return;
+    if (QTIsSileo()) return;
+    QTAddInlineButtonToCell(self.contentView);
+}
+%end
+
+%hook UICollectionViewCell
+- (void)layoutSubviews {
+    %orig;
+    if (!QTIsTargetApp()) return;
+    if (QTIsSileo()) return;
+    QTAddInlineButtonToCell(self.contentView);
+}
+%end
+
+#pragma mark - Sileo NavBar button
+
+static void QTInstallSileoNavButton(void) {
+    if (!QTIsSileo()) return;
+    if (!QTGetBool(@"enabled", YES)) return;
+
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return;
+    UIViewController *top = QTTopViewController(w.rootViewController);
+    if (!top) return;
+    UINavigationItem *item = top.navigationItem;
+    if (!item) return;
+
+    for (UIBarButtonItem *it in item.rightBarButtonItems ?: @[]) {
+        if (it.tag == kQTSileoBtnTag) return;
+    }
+
+    UIBarButtonItem *btn = [[UIBarButtonItem alloc] initWithTitle:@"🌐"
+                                                            style:UIBarButtonItemStylePlain
+                                                           target:nil
+                                                           action:nil];
+    btn.tag = kQTSileoBtnTag;
+
+    if (@available(iOS 14.0, *)) {
+        btn.primaryAction = [UIAction actionWithHandler:^(__unused UIAction *a) {
+            NSString *t = QTExtractTextFromView(top.view);
+            if (t.length) QTTranslateText(t);
+            else QTTranslateVisibleScreenOCR();
+        }];
+    } else {
+        // fallback: OCR
+        btn.target = w;
+        btn.action = @selector(qt_inlineTap:);
+    }
+
+    NSMutableArray *arr = [NSMutableArray arrayWithArray:(item.rightBarButtonItems ?: @[])];
+    [arr addObject:btn];
+    item.rightBarButtonItems = arr;
 }
 
 %hook UIApplication
 - (void)applicationDidBecomeActive:(id)application {
     %orig;
-    dispatch_async(dispatch_get_main_queue(), ^{ QTInstallFloatingButton(); });
+    if (!QTIsTargetApp()) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        QTInstallSileoNavButton();
+    });
 }
 %end
 
 %ctor {
-    dispatch_async(dispatch_get_main_queue(), ^{ QTInstallFloatingButton(); });
+    if (!QTIsTargetApp()) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        QTInstallSileoNavButton();
+    });
 }

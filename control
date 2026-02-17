@@ -2,8 +2,8 @@ Package: com.hombergerkurde.quicktranslate
 Name: QuickTranslate
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Floating translate button with OCR + multi-provider fallback.
+Description: QuickTranslate - inline translate buttons + settings
 Maintainer: You
 Author: You
 Section: Tweaks
-Depends: preferenceloader, mobilesubstrate
+Depends: preferenceloader
