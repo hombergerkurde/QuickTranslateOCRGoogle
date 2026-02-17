@@ -17,6 +17,9 @@ QuickTranslatePrefs_FRAMEWORKS = UIKit
 QuickTranslatePrefs_PRIVATE_FRAMEWORKS = Preferences
 QuickTranslatePrefs_EXTRA_FRAMEWORKS = AltList
 QuickTranslatePrefs_CFLAGS = -fobjc-arc
+# GitHub Actions / Xcode SDK builds sometimes don't add PrivateFrameworks search paths.
+# Force it so linking Preferences.framework works.
+QuickTranslatePrefs_LDFLAGS += -F$(SYSROOT)/System/Library/PrivateFrameworks
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/bundle.mk
