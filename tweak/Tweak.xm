@@ -1,39 +1,50 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+static void QTInstallFloatingButton(void) {
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return;
 
-  #import <UIKit/UIKit.h>
-#import <Foundation/Foundation.h>
-#import <objc/runtime.h>
+    // nur einmal hinzufügen
+    if ([w viewWithTag:987654] != nil) return;
 
-static UIWindow *QTGetKeyWindow(void) {
-    UIApplication *app = UIApplication.sharedApplication;
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    btn.tag = 987654;
+    [btn setTitle:@"🌐" forState:UIControlStateNormal];
+    btn.frame = CGRectMake(20, 200, 44, 44);
+    btn.layer.cornerRadius = 22;
+    btn.clipsToBounds = YES;
 
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *scene in app.connectedScenes) {
-            if (scene.activationState != UISceneActivationStateForegroundActive) continue;
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+    // Test: zeigt erstmal nur ein Popup
+    [btn addTarget:nil action:@selector(qt_testTap) forControlEvents:UIControlEventTouchUpInside];
 
-            UIWindowScene *ws = (UIWindowScene *)scene;
-
-            for (UIWindow *w in ws.windows) {
-                if (w.isKeyWindow) return w;
-            }
-            if (ws.windows.count > 0) return ws.windows.firstObject;
-        }
-
-        for (UIScene *scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            UIWindowScene *ws = (UIWindowScene *)scene;
-            if (ws.windows.count > 0) return ws.windows.firstObject;
-        }
-
-        return nil;
-    }
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    return app.keyWindow ?: app.windows.firstObject;
-#pragma clang diagnostic pop
+    [w addSubview:btn];
 }
-  
+
+// wir hängen den Handler an UIWindow an (einfacher, ohne neue Klassen)
+@interface UIWindow (QTTest)
+- (void)qt_testTap;
+@end
+
+@implementation UIWindow (QTTest)
+- (void)qt_testTap {
+    UIAlertController *ac =
+        [UIAlertController alertControllerWithTitle:@"QuickTranslate"
+                                            message:@"Button funktioniert ✅"
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+
+    UIViewController *root = self.rootViewController;
+    if (!root) return;
+
+    while (root.presentedViewController) root = root.presentedViewController;
+    [root presentViewController:ac animated:YES completion:nil];
+}
+@end
+
+%ctor {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        QTInstallFloatingButton();
+    });
+}
+
