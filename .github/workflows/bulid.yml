@@ -6,22 +6,32 @@ on:
 jobs:
   build:
     runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Install Theos + deps
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build deps
         run: |
           brew install ldid dpkg make
+
+      - name: Install Theos
+        run: |
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      - name: Fetch iOS SDK (Theos)
+      # ✅ FIX: make postinst executable so dpkg-deb doesn't fail
+      - name: Fix postinst permissions
         run: |
-          mkdir -p $THEOS/sdks
-          # Theos expects an iPhoneOS SDK present. Many repos include a script or you add one yourself.
-          # If your project already includes an SDK or uses a CI-friendly SDK setup, keep that.
-          # Otherwise: add your own SDK acquisition step here.
-          ls -la $THEOS/sdks || true
+          if [ -f "layout/DEBIAN/postinst" ]; then
+            chmod 755 layout/DEBIAN/postinst
+            ls -la layout/DEBIAN/postinst
+          elif [ -f "DEBIAN/postinst" ]; then
+            chmod 755 DEBIAN/postinst
+            ls -la DEBIAN/postinst
+          else
+            echo "No postinst found, skipping."
+          fi
 
       - name: Build rootless package
         run: |
