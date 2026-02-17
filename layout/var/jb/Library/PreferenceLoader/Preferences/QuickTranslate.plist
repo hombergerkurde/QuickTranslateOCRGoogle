@@ -2,20 +2,65 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Filter</key>
+
+  <key>entry</key>
   <dict>
-    <key>Bundles</key>
-    <array>
-      <string>com.apple.mobilesafari</string>
-      <string>net.whatsapp.WhatsApp</string>
-      <string>com.burbn.instagram</string>
-      <string>com.facebook.Facebook</string>
-      <string>com.hammerandchisel.discord</string>
-      <string>ph.telegra.Telegraph</string>
-      <string>com.reddit.Reddit</string>
-      <string>com.atebits.Tweetie2</string>
-      <string>org.coolstar.SileoStore</string>
-    </array>
+    <key>cell</key><string>PSLinkCell</string>
+    <key>label</key><string>QuickTranslate</string>
   </dict>
+
+  <key>title</key><string>QuickTranslate</string>
+
+  <key>items</key>
+  <array>
+    <dict>
+      <key>cell</key><string>PSSwitchCell</string>
+      <key>label</key><string>Aktiviert</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>enabled</string>
+      <key>default</key><true/>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSSwitchCell</string>
+      <key>label</key><string>Nur in ausgewählten Apps</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>useWhitelist</string>
+      <key>default</key><false/>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSLinkCell</string>
+      <key>label</key><string>Apps auswählen…</string>
+      <key>detail</key><string>ATLApplicationListMultiSelectionController</string>
+
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>whitelist</string>
+
+      <key>excludeSystemApps</key><true/>
+      <key>enabledKey</key><string>useWhitelist</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>Google API Key</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>googleApiKey</string>
+      <key>secure</key><true/>
+      <key>placeholder</key><string>AIza…</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>Zielsprache</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>targetLang</string>
+      <key>default</key><string>de</string>
+      <key>placeholder</key><string>de / en / tr</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
+    </dict>
+  </array>
+
 </dict>
 </plist>

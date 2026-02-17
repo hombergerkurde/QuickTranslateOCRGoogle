@@ -2,20 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Filter</key>
+  <key>entry</key>
   <dict>
-    <key>Bundles</key>
-    <array>
-      <string>com.apple.mobilesafari</string>
-      <string>net.whatsapp.WhatsApp</string>
-      <string>com.burbn.instagram</string>
-      <string>com.facebook.Facebook</string>
-      <string>com.hammerandchisel.discord</string>
-      <string>ph.telegra.Telegraph</string>
-      <string>com.reddit.Reddit</string>
-      <string>com.atebits.Tweetie2</string>
-      <string>org.coolstar.SileoStore</string>
-    </array>
+    <key>cell</key><string>PSLinkCell</string>
+    <key>label</key><string>QuickTranslate</string>
+    <key>bundle</key><string>QuickTranslatePrefs</string>
   </dict>
 </dict>
 </plist>
