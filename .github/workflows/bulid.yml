@@ -1,0 +1,35 @@
+name: Build DEB (rootless)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Theos + deps
+        run: |
+          brew install ldid dpkg make
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+
+      - name: Fetch iOS SDK (Theos)
+        run: |
+          mkdir -p $THEOS/sdks
+          # Theos expects an iPhoneOS SDK present. Many repos include a script or you add one yourself.
+          # If your project already includes an SDK or uses a CI-friendly SDK setup, keep that.
+          # Otherwise: add your own SDK acquisition step here.
+          ls -la $THEOS/sdks || true
+
+      - name: Build rootless package
+        run: |
+          export THEOS=$THEOS
+          make clean package THEOS_PACKAGE_SCHEME=rootless
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: packages/*.deb
