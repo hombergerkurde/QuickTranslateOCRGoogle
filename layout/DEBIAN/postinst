@@ -1,8 +1,4 @@
 #!/bin/sh
-set -e
 killall -9 Preferences 2>/dev/null || true
 killall -9 SpringBoard 2>/dev/null || true
 exit 0
-git update-index --chmod=+x layout/DEBIAN/postinst
-git commit -m "Make postinst executable"
-git push

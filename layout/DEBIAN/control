@@ -1,0 +1,9 @@
+Package: com.hombergerkurde.quicktranslate
+Name: QuickTranslate
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: QuickTranslate - OCR whole screen and translate with multiple providers.
+Maintainer: Zaxooo
+Author: Zaxooo
+Section: Tweaks
+Depends: preferenceloader
