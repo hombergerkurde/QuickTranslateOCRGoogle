@@ -23,25 +23,32 @@ static BOOL QTGetBool(NSString *key, BOOL def) {
     return v ? [v boolValue] : def;
 }
 
-#pragma mark - Window / Top VC (iOS 15+ safe)
+#pragma mark - Window / Top VC
 
 static UIWindow *QTGetKeyWindow(void) {
     UIApplication *app = UIApplication.sharedApplication;
+
     if (@available(iOS 13.0, *)) {
         for (UIScene *scene in app.connectedScenes) {
             if (scene.activationState != UISceneActivationStateForegroundActive) continue;
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+
             UIWindowScene *ws = (UIWindowScene *)scene;
-            for (UIWindow *w in ws.windows) if (w.isKeyWindow) return w;
+            for (UIWindow *w in ws.windows) {
+                if (w.isKeyWindow) return w;
+            }
             if (ws.windows.count > 0) return ws.windows.firstObject;
         }
+
         for (UIScene *scene in app.connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
             UIWindowScene *ws = (UIWindowScene *)scene;
             if (ws.windows.count > 0) return ws.windows.firstObject;
         }
+
         return nil;
     }
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     return app.keyWindow ?: app.windows.firstObject;
@@ -51,8 +58,12 @@ static UIWindow *QTGetKeyWindow(void) {
 static UIViewController *QTTopViewController(UIViewController *vc) {
     if (!vc) return nil;
     while (vc.presentedViewController) vc = vc.presentedViewController;
-    if ([vc isKindOfClass:[UINavigationController class]]) return QTTopViewController(((UINavigationController *)vc).topViewController);
-    if ([vc isKindOfClass:[UITabBarController class]]) return QTTopViewController(((UITabBarController *)vc).selectedViewController);
+    if ([vc isKindOfClass:[UINavigationController class]]) {
+        return QTTopViewController(((UINavigationController *)vc).topViewController);
+    }
+    if ([vc isKindOfClass:[UITabBarController class]]) {
+        return QTTopViewController(((UITabBarController *)vc).selectedViewController);
+    }
     return vc;
 }
 
@@ -79,7 +90,10 @@ static void QTShowResultPopup(NSString *translated) {
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Übersetzung"
                                                                 message:msg
                                                          preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+
+    [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren"
+                                          style:UIAlertActionStyleDefault
+                                        handler:^(__unused UIAlertAction *a){
         UIPasteboard.generalPasteboard.string = msg;
     }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Schließen" style:UIAlertActionStyleCancel handler:nil]];
@@ -113,6 +127,7 @@ static void QTShowHUD(NSString *text) {
 
     CGFloat maxW = MIN(340.0, w.bounds.size.width - 40.0);
     CGSize maxSize = CGSizeMake(maxW, CGFLOAT_MAX);
+
     CGRect r = [lbl.text boundingRectWithSize:maxSize
                                       options:NSStringDrawingUsesLineFragmentOrigin
                                    attributes:@{NSFontAttributeName: lbl.font}
@@ -126,6 +141,7 @@ static void QTShowHUD(NSString *text) {
                            w.safeAreaInsets.top + 18.0,
                            width,
                            height);
+
     [w addSubview:lbl];
 }
 
@@ -134,9 +150,10 @@ static void QTShowHUD(NSString *text) {
 static UIImage *QTScreenSnapshot(void) {
     UIWindow *w = QTGetKeyWindow();
     if (!w) return nil;
+
     CGSize size = w.bounds.size;
     UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size];
-    UIImage *img = [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull ctx) {
+    UIImage *img = [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
         [w drawViewHierarchyInRect:(CGRect){CGPointZero, size} afterScreenUpdates:NO];
     }];
     return img;
@@ -173,7 +190,7 @@ static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError 
     });
 }
 
-#pragma mark - Network helpers
+#pragma mark - Network Helpers
 
 static NSURLSession *QTSession(void) {
     NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
@@ -198,6 +215,7 @@ static NSString *QTHTTPErrorMessage(NSHTTPURLResponse *http, id jsonObj, NSStrin
 
 #pragma mark - Providers
 
+// LibreTranslate: /translate, api_key optional
 static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
     NSString *base = (serverURL.length ? serverURL : @"https://translate.cutie.dating");
     while ([base hasSuffix:@"/"]) base = [base substringToIndex:base.length - 1];
@@ -210,10 +228,12 @@ static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *t
 
     NSString *q = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
     NSString *t = [target stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"de";
-    NSString *k = [apiKey stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
 
     NSMutableString *bodyStr = [NSMutableString stringWithFormat:@"q=%@&source=auto&target=%@&format=text", q, t];
-    if (k.length) [bodyStr appendFormat:@"&api_key=%@", k];
+    if (apiKey.length) {
+        NSString *k = [apiKey stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
+        [bodyStr appendFormat:@"&api_key=%@", k];
+    }
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod = @"POST";
@@ -247,6 +267,7 @@ static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *t
     [task resume];
 }
 
+// DeepL: Authorization: DeepL-Auth-Key <key>
 static void QTTranslate_DeepL(NSString *authKey, BOOL pro, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
     if (authKey.length == 0) {
         if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:201 userInfo:@{NSLocalizedDescriptionKey:@"DeepL Key fehlt"}]);
@@ -261,8 +282,12 @@ static void QTTranslate_DeepL(NSString *authKey, BOOL pro, NSString *text, NSStr
     }
 
     NSString *q = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
-    NSString *t = [target stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"DE";
-    NSString *bodyStr = [NSString stringWithFormat:@"text=%@&target_lang=%@", q, t];
+    NSString *tg = (target.length ? target : @"DE");
+    tg = [tg stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (tg.length == 2) tg = tg.uppercaseString;
+
+    NSString *bodyStr = [NSString stringWithFormat:@"text=%@&target_lang=%@", q,
+                         [tg stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"DE"];
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod = @"POST";
@@ -300,14 +325,15 @@ static void QTTranslate_DeepL(NSString *authKey, BOOL pro, NSString *text, NSStr
     [task resume];
 }
 
+// Microsoft Translator v3
 static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
     if (key.length == 0) {
         if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:301 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft Key fehlt"}]);
         return;
     }
 
-    NSString *urlStr = [NSString stringWithFormat:@"https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=%@",
-                        [target stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"de"];
+    NSString *to = [target stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"de";
+    NSString *urlStr = [NSString stringWithFormat:@"https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=%@", to];
     NSURL *url = [NSURL URLWithString:urlStr];
     if (!url) {
         if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:302 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft URL ungültig"}]);
@@ -320,7 +346,7 @@ static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSSt
     [req setValue:key forHTTPHeaderField:@"Ocp-Apim-Subscription-Key"];
     if (region.length) [req setValue:region forHTTPHeaderField:@"Ocp-Apim-Subscription-Region"];
 
-    NSArray *bodyArr = @[@{@"Text": text ?: @""}];
+    NSArray *bodyArr = @[@{@"Text": (text ?: @"")}];
     req.HTTPBody = [NSJSONSerialization dataWithJSONObject:bodyArr options:0 error:nil];
 
     NSURLSessionDataTask *task = [QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
@@ -335,7 +361,8 @@ static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSSt
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:(int)http.statusCode userInfo:@{NSLocalizedDescriptionKey: msg}]);
             return;
         }
-        if (parseErr || ![obj isKindOfClass:[NSArray class]] || [(NSArray *)obj count] == 0) {
+
+        if (parseErr || ![obj isKindOfClass:[NSArray class]] || ((NSArray *)obj).count == 0) {
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:303 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft Antwort ungültig"}]);
             return;
         }
@@ -354,14 +381,15 @@ static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSSt
     [task resume];
 }
 
+// Google Translate Cloud v2 (API key)
 static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
     if (apiKey.length == 0) {
         if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:401 userInfo:@{NSLocalizedDescriptionKey:@"Google API Key fehlt"}]);
         return;
     }
 
-    NSString *urlStr = [NSString stringWithFormat:@"https://translation.googleapis.com/language/translate/v2?key=%@",
-                        [apiKey stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @""];
+    NSString *k = [apiKey stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
+    NSString *urlStr = [NSString stringWithFormat:@"https://translation.googleapis.com/language/translate/v2?key=%@", k];
     NSURL *url = [NSURL URLWithString:urlStr];
     if (!url) {
         if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:402 userInfo:@{NSLocalizedDescriptionKey:@"Google URL ungültig"}]);
@@ -371,8 +399,7 @@ static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *tar
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod = @"POST";
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-
-    NSDictionary *payload = @{@"q": text ?: @"", @"target": target ?: @"de", @"format": @"text"};
+    NSDictionary *payload = @{@"q": (text ?: @""), @"target": (target ?: @"de"), @"format": @"text"};
     req.HTTPBody = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
 
     NSURLSessionDataTask *task = [QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
@@ -387,6 +414,7 @@ static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *tar
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:(int)http.statusCode userInfo:@{NSLocalizedDescriptionKey: msg}]);
             return;
         }
+
         if (parseErr || ![obj isKindOfClass:[NSDictionary class]]) {
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:403 userInfo:@{NSLocalizedDescriptionKey:@"Google Antwort ungültig"}]);
             return;
@@ -406,14 +434,14 @@ static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *tar
     [task resume];
 }
 
-#pragma mark - Provider selection + fallback
+#pragma mark - Provider chain + fallback
 
 static NSArray<NSString *> *QTProviderChain(void) {
     NSString *p = QTGetString(@"providerPrimary", @"libre");
     NSString *f1 = QTGetString(@"providerFallback1", @"deepl");
     NSString *f2 = QTGetString(@"providerFallback2", @"microsoft");
 
-    NSMutableArray *arr = [NSMutableArray new];
+    NSMutableArray<NSString *> *arr = [NSMutableArray new];
     if (p.length) [arr addObject:p];
     if (f1.length && ![f1 isEqualToString:@"off"]) [arr addObject:f1];
     if (f2.length && ![f2 isEqualToString:@"off"]) [arr addObject:f2];
@@ -421,7 +449,7 @@ static NSArray<NSString *> *QTProviderChain(void) {
 }
 
 static BOOL QTProviderIsConfigured(NSString *provider) {
-    if ([provider isEqualToString:@"libre"]) return YES;
+    if ([provider isEqualToString:@"libre"]) return YES; // server kann public sein
     if ([provider isEqualToString:@"deepl"]) return QTGetString(@"deeplKey", @"").length > 0;
     if ([provider isEqualToString:@"microsoft"]) return QTGetString(@"msKey", @"").length > 0;
     if ([provider isEqualToString:@"google"]) return QTGetString(@"googleKey", @"").length > 0;
@@ -438,9 +466,7 @@ static void QTTranslate_WithProvider(NSString *provider, NSString *text, NSStrin
     if ([provider isEqualToString:@"deepl"]) {
         NSString *key = QTGetString(@"deeplKey", @"");
         BOOL pro = QTGetBool(@"deeplPro", NO);
-        NSString *tg = target.uppercaseString;
-        if (tg.length == 2) tg = tg; // DE, EN, FR etc.
-        QTTranslate_DeepL(key, pro, text, tg, completion);
+        QTTranslate_DeepL(key, pro, text, target, completion);
         return;
     }
     if ([provider isEqualToString:@"microsoft"]) {
@@ -454,6 +480,7 @@ static void QTTranslate_WithProvider(NSString *provider, NSString *text, NSStrin
         QTTranslate_GoogleV2(key, text, target, completion);
         return;
     }
+
     if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:999 userInfo:@{NSLocalizedDescriptionKey:@"Unbekannter Anbieter"}]);
 }
 
@@ -464,13 +491,14 @@ static void QTTranslate_WithFallbacks(NSArray<NSString *> *chain, NSInteger idx,
     }
 
     NSString *p = chain[idx];
+
     if (!QTProviderIsConfigured(p)) {
         QTTranslate_WithFallbacks(chain, idx + 1, text, target, completion);
         return;
     }
 
     QTTranslate_WithProvider(p, text, target, ^(NSString *translated, NSError *err) {
-        if (translated.length) {
+        if (translated.length > 0 && !err) {
             if (completion) completion(translated, nil);
             return;
         }
@@ -478,7 +506,7 @@ static void QTTranslate_WithFallbacks(NSArray<NSString *> *chain, NSInteger idx,
     });
 }
 
-#pragma mark - Main translate flow
+#pragma mark - Main flow
 
 static BOOL gQTBusy = NO;
 
@@ -488,26 +516,37 @@ static void QTTranslateVisibleScreen(void) {
     gQTBusy = YES;
 
     NSString *target = QTGetString(@"targetLang", @"de");
+    target = [target stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (target.length == 0) target = @"de";
 
     dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Erkenne Text…"); });
 
     UIImage *snap = QTScreenSnapshot();
     if (!snap) {
-        dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); QTShowAlert(@"QuickTranslate", @"Screenshot fehlgeschlagen."); });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            QTHideHUD();
+            QTShowAlert(@"QuickTranslate", @"Screenshot fehlgeschlagen.");
+        });
         gQTBusy = NO;
         return;
     }
 
     QTRunOCR(snap, ^(NSString *text, NSError *err) {
         if (err) {
-            dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler"); });
+            dispatch_async(dispatch_get_main_queue(), ^{
+                QTHideHUD();
+                QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler");
+            });
             gQTBusy = NO;
             return;
         }
 
         NSString *trim = [(text ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (trim.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); QTShowAlert(@"QuickTranslate", @"Kein Text erkannt."); });
+            dispatch_async(dispatch_get_main_queue(), ^{
+                QTHideHUD();
+                QTShowAlert(@"QuickTranslate", @"Kein Text erkannt.");
+            });
             gQTBusy = NO;
             return;
         }
@@ -521,21 +560,25 @@ static void QTTranslateVisibleScreen(void) {
         QTTranslate_WithFallbacks(chain, 0, trim, target, ^(NSString *translated, NSError *tErr) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 QTHideHUD();
-                if (tErr) QTShowAlert(@"Übersetzung fehlgeschlagen", tErr.localizedDescription ?: @"Unbekannter Fehler");
-                else QTShowResultPopup(translated);
+                if (tErr) {
+                    QTShowAlert(@"Übersetzung fehlgeschlagen", tErr.localizedDescription ?: @"Unbekannter Fehler");
+                } else {
+                    QTShowResultPopup(translated);
+                }
             });
             gQTBusy = NO;
         });
     });
 }
 
-#pragma mark - Floating button (tap reliability)
+#pragma mark - Button (draggable + reliable tap)
 
 static void QTInstallFloatingButton(void);
 
 @interface UIView (QTDrag)
 - (void)qt_pan:(UIPanGestureRecognizer *)gr;
 @end
+
 @implementation UIView (QTDrag)
 - (void)qt_pan:(UIPanGestureRecognizer *)gr {
     UIView *v = gr.view;
@@ -546,24 +589,29 @@ static void QTInstallFloatingButton(void);
 }
 @end
 
-@interface UIWindow (QTTapHandler)
-- (void)qt_qtTap;
+@interface UIWindow (QTFallbackTap)
+- (void)qt_fallbackTap;
 @end
-@implementation UIWindow (QTTapHandler)
-- (void)qt_qtTap { QTTranslateVisibleScreen(); }
+
+@implementation UIWindow (QTFallbackTap)
+- (void)qt_fallbackTap {
+    QTTranslateVisibleScreen();
+}
 @end
 
 static void QTInstallFloatingButton(void) {
     UIWindow *w = QTGetKeyWindow();
     if (!w) return;
 
-    if (!QTGetBool(@"enabled", YES)) {
-        UIView *old = [w viewWithTag:kQTButtonTag];
+    BOOL enabled = QTGetBool(@"enabled", YES);
+    UIView *old = [w viewWithTag:kQTButtonTag];
+
+    if (!enabled) {
         if (old) [old removeFromSuperview];
         return;
     }
 
-    UIButton *btn = (UIButton *)[w viewWithTag:kQTButtonTag];
+    UIButton *btn = (UIButton *)old;
     if (!btn) {
         btn = [UIButton buttonWithType:UIButtonTypeSystem];
         btn.tag = kQTButtonTag;
@@ -576,8 +624,8 @@ static void QTInstallFloatingButton(void) {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:btn action:@selector(qt_pan:)];
         [btn addGestureRecognizer:pan];
 
-        // IMPORTANT: always use addTarget for reliability in all apps
-        [btn addTarget:w action:@selector(qt_qtTap) forControlEvents:UIControlEventTouchUpInside];
+        // zuverlässig in allen Apps
+        [btn addTarget:w action:@selector(qt_fallbackTap) forControlEvents:UIControlEventTouchUpInside];
 
         [w addSubview:btn];
     }
@@ -588,10 +636,14 @@ static void QTInstallFloatingButton(void) {
 %hook UIApplication
 - (void)applicationDidBecomeActive:(id)application {
     %orig;
-    dispatch_async(dispatch_get_main_queue(), ^{ QTInstallFloatingButton(); });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        QTInstallFloatingButton();
+    });
 }
 %end
 
 %ctor {
-    dispatch_async(dispatch_get_main_queue(), ^{ QTInstallFloatingButton(); });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        QTInstallFloatingButton();
+    });
 }
