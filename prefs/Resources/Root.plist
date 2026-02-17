@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>title</key>
+  <string>QuickTranslate</string>
+  <key>items</key>
+  <array>
+    <dict>
+      <key>cell</key><string>PSGroupCell</string>
+      <key>label</key><string>Allgemein</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSSwitchCell</string>
+      <key>label</key><string>Aktiviert</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>enabled</string>
+      <key>default</key><true/>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSSwitchCell</string>
+      <key>label</key><string>Nur in ausgewählten Apps</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>useWhitelist</string>
+      <key>default</key><false/>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSLinkCell</string>
+      <key>label</key><string>Apps auswählen…</string>
+      <key>detail</key><string>ATLApplicationListMultiSelectionController</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>whitelist</string>
+      <key>excludeSystemApps</key><true/>
+      <key>enabledKey</key><string>useWhitelist</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSGroupCell</string>
+      <key>label</key><string>Google Translate</string>
+      <key>footerText</key>
+      <string>Du brauchst einen Google Cloud Translation API Key. Dieser wird lokal in den Preferences gespeichert und bei jeder Übersetzung an Google gesendet.</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSEditTextCell</string>
+      <key>label</key><string>API Key</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>googleApiKey</string>
+      <key>placeholder</key><string>AIza…</string>
+      <key>isSecure</key><true/>
+      <key>autoCapitalize</key><string>None</string>
+      <key>keyboardType</key><string>ASCIICapable</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSEditTextCell</string>
+      <key>label</key><string>Zielsprache</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>targetLang</string>
+      <key>default</key><string>de</string>
+      <key>placeholder</key><string>de / en / tr …</string>
+      <key>keyboardType</key><string>ASCIICapable</string>
+      <key>autoCapitalize</key><string>None</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSSwitchCell</string>
+      <key>label</key><string>OCR Bereich (Tap-Region) vergrößern</string>
+      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
+      <key>key</key><string>largeROI</string>
+      <key>default</key><false/>
+    </dict>
+
+  </array>
+</dict>
+</plist>

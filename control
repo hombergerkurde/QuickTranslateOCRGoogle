@@ -1,0 +1,9 @@
+Package: 1.com.quicktranslate.prefsfixed
+Name: QuickTranslate (OCR + Google)
+Depends: firmware (>= 15.0), preferenceloader, com.opa334.altlist
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Floating translate button (no selection) using Vision OCR + Google Translate API. Includes AltList whitelist.
+Maintainer: Zaxooo
+Author: Zaxooo
+Section: Tweaks
