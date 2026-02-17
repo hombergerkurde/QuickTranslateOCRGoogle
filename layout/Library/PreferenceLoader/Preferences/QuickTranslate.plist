@@ -2,75 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-
   <key>entry</key>
   <dict>
-    <key>cell</key><string>PSLinkCell</string>
-    <key>label</key><string>QuickTranslate</string>
+    <key>bundle</key>
+    <string>QuickTranslatePrefs</string>
+    <key>cell</key>
+    <string>PSLinkCell</string>
+    <key>detail</key>
+    <string>QuickTranslatePrefsRootListController</string>
+    <key>icon</key>
+    <string>icon</string>
+    <key>isController</key>
+    <true/>
+    <key>label</key>
+    <string>QuickTranslate</string>
   </dict>
-
-  <key>title</key><string>QuickTranslate</string>
-
-  <key>items</key>
-  <array>
-    <dict>
-      <key>cell</key><string>PSSwitchCell</string>
-      <key>label</key><string>Aktiviert</string>
-      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
-      <key>key</key><string>enabled</string>
-      <key>default</key><true/>
-    </dict>
-
-    <dict>
-      <key>cell</key><string>PSSwitchCell</string>
-      <key>label</key><string>Nur in ausgewählten Apps</string>
-      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
-      <key>key</key><string>useWhitelist</string>
-      <key>default</key><false/>
-    </dict>
-
-    <dict>
-      <key>cell</key><string>PSLinkCell</string>
-      <key>label</key><string>Apps auswählen…</string>
-      <key>detail</key><string>ATLApplicationListMultiSelectionController</string>
-      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
-      <key>key</key><string>whitelist</string>
-      <key>excludeSystemApps</key><true/>
-      <key>enabledKey</key><string>useWhitelist</string>
-    </dict>
-
-    <dict>
-      <key>cell</key><string>PSTextFieldCell</string>
-      <key>label</key><string>LibreTranslate Server</string>
-      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
-      <key>key</key><string>ltServer</string>
-      <key>default</key><string>https://libretranslate.com</string>
-      <key>placeholder</key><string>https://dein-server.tld</string>
-      <key>autoCaps</key><string>none</string>
-      <key>autoCorrect</key><string>no</string>
-    </dict>
-
-    <dict>
-      <key>cell</key><string>PSTextFieldCell</string>
-      <key>label</key><string>Zielsprache</string>
-      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
-      <key>key</key><string>targetLang</string>
-      <key>default</key><string>de</string>
-      <key>placeholder</key><string>de / en / tr</string>
-      <key>autoCaps</key><string>none</string>
-      <key>autoCorrect</key><string>no</string>
-    </dict>
-
-    <dict>
-      <key>cell</key><string>PSTextFieldCell</string>
-      <key>label</key><string>OCR Bereich (px)</string>
-      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
-      <key>key</key><string>roiSize</string>
-      <key>default</key><string>700</string>
-      <key>keyboard</key><string>number-pad</string>
-    </dict>
-
-  </array>
-
 </dict>
 </plist>
