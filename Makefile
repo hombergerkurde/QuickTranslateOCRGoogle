@@ -13,8 +13,9 @@ QuickTranslate_FRAMEWORKS = UIKit Vision
 BUNDLE_NAME = QuickTranslatePrefs
 QuickTranslatePrefs_FILES = prefs/PrefsRootListController.m
 QuickTranslatePrefs_INSTALL_PATH = /Library/PreferenceBundles
-QuickTranslatePrefs_FRAMEWORKS = UIKit Preferences
+QuickTranslatePrefs_FRAMEWORKS = UIKit
 QuickTranslatePrefs_PRIVATE_FRAMEWORKS = Preferences
+QuickTranslatePrefs_EXTRA_FRAMEWORKS = AltList
 QuickTranslatePrefs_CFLAGS = -fobjc-arc
 
 include $(THEOS_MAKE_PATH)/tweak.mk

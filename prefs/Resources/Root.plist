@@ -7,11 +7,6 @@
   <key>items</key>
   <array>
     <dict>
-      <key>cell</key><string>PSGroupCell</string>
-      <key>label</key><string>Allgemein</string>
-    </dict>
-
-    <dict>
       <key>cell</key><string>PSSwitchCell</string>
       <key>label</key><string>Aktiviert</string>
       <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
@@ -40,19 +35,14 @@
     <dict>
       <key>cell</key><string>PSGroupCell</string>
       <key>label</key><string>Google Translate</string>
-      <key>footerText</key>
-      <string>Du brauchst einen Google Cloud Translation API Key. Dieser wird lokal in den Preferences gespeichert und bei jeder Übersetzung an Google gesendet.</string>
     </dict>
 
     <dict>
-      <key>cell</key><string>PSEditTextCell</string>
+      <key>cell</key><string>PSSecureEditTextCell</string>
       <key>label</key><string>API Key</string>
       <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
       <key>key</key><string>googleApiKey</string>
-      <key>placeholder</key><string>AIza…</string>
-      <key>isSecure</key><true/>
-      <key>autoCapitalize</key><string>None</string>
-      <key>keyboardType</key><string>ASCIICapable</string>
+      <key>placeholder</key><string>Dein Google API Key</string>
     </dict>
 
     <dict>
@@ -61,19 +51,8 @@
       <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
       <key>key</key><string>targetLang</string>
       <key>default</key><string>de</string>
-      <key>placeholder</key><string>de / en / tr …</string>
-      <key>keyboardType</key><string>ASCIICapable</string>
-      <key>autoCapitalize</key><string>None</string>
+      <key>placeholder</key><string>de, en, tr …</string>
     </dict>
-
-    <dict>
-      <key>cell</key><string>PSSwitchCell</string>
-      <key>label</key><string>OCR Bereich (Tap-Region) vergrößern</string>
-      <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
-      <key>key</key><string>largeROI</string>
-      <key>default</key><false/>
-    </dict>
-
   </array>
 </dict>
 </plist>
