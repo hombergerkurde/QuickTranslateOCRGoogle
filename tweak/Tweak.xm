@@ -5,7 +5,6 @@ static UIWindow *QTGetKeyWindow(void) {
     UIApplication *app = UIApplication.sharedApplication;
 
     if (@available(iOS 13.0, *)) {
-        // 1) Foreground Active Scene bevorzugen
         for (UIScene *scene in app.connectedScenes) {
             if (scene.activationState != UISceneActivationStateForegroundActive) continue;
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
@@ -17,7 +16,6 @@ static UIWindow *QTGetKeyWindow(void) {
             if (ws.windows.count > 0) return ws.windows.firstObject;
         }
 
-        // 2) Fallback: irgendeine WindowScene
         for (UIScene *scene in app.connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
             UIWindowScene *ws = (UIWindowScene *)scene;
@@ -29,22 +27,8 @@ static UIWindow *QTGetKeyWindow(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    // iOS 12 und älter – wird bei dir eh nicht relevant sein, aber safe:
     return app.keyWindow ?: app.windows.firstObject;
 #pragma clang diagnostic pop
-}
-
-static UIViewController *QTTopVC(UIViewController *vc) {
-    if (!vc) return nil;
-    while (vc.presentedViewController) vc = vc.presentedViewController;
-
-    if ([vc isKindOfClass:[UINavigationController class]]) {
-        return QTTopVC(((UINavigationController *)vc).topViewController);
-    }
-    if ([vc isKindOfClass:[UITabBarController class]]) {
-        return QTTopVC(((UITabBarController *)vc).selectedViewController);
-    }
-    return vc;
 }
 
 static void QTShowToast(NSString *msg) {
