@@ -1,4 +1,12 @@
-#import "QTCRootListController.h"
+#import <UIKit/UIKit.h>
+#import <Preferences/PSListController.h>
+#import <Preferences/PSSpecifier.h>
+#import <spawn.h>
+
+extern char **environ;
+
+@interface QTCRootListController : PSListController
+@end
 
 @implementation QTCRootListController
 
@@ -9,12 +17,22 @@
     return _specifiers;
 }
 
+// Action from Root.plist button: "respring"
 - (void)respring {
-    // Light respring: close Preferences and restart SpringBoard
-    NSTask *task = [[NSTask alloc] init];
-    task.launchPath = @"/var/jb/usr/bin/killall";
-    task.arguments = @[ @"-9", @"SpringBoard" ];
-    @try { [task launch]; } @catch (__unused NSException *e) {}
+    pid_t pid;
+    const char *path = "/var/jb/usr/bin/killall";
+
+    // rootless fallback: some setups also have /usr/bin/killall
+    if (access(path, X_OK) != 0) path = "/usr/bin/killall";
+
+    char *const args[] = {
+        (char *)path,
+        (char *)"-9",
+        (char *)"SpringBoard",
+        NULL
+    };
+
+    posix_spawn(&pid, path, NULL, NULL, args, environ);
 }
 
 @end
