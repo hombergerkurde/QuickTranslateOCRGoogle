@@ -23,7 +23,7 @@ static BOOL QTGetBool(NSString *key, BOOL def) {
     return v ? [v boolValue] : def;
 }
 
-#pragma mark - Window / Top VC
+#pragma mark - Window / Top VC (iOS 15+ safe)
 
 static UIWindow *QTGetKeyWindow(void) {
     UIApplication *app = UIApplication.sharedApplication;
@@ -58,12 +58,8 @@ static UIWindow *QTGetKeyWindow(void) {
 static UIViewController *QTTopViewController(UIViewController *vc) {
     if (!vc) return nil;
     while (vc.presentedViewController) vc = vc.presentedViewController;
-    if ([vc isKindOfClass:[UINavigationController class]]) {
-        return QTTopViewController(((UINavigationController *)vc).topViewController);
-    }
-    if ([vc isKindOfClass:[UITabBarController class]]) {
-        return QTTopViewController(((UITabBarController *)vc).selectedViewController);
-    }
+    if ([vc isKindOfClass:[UINavigationController class]]) return QTTopViewController(((UINavigationController *)vc).topViewController);
+    if ([vc isKindOfClass:[UITabBarController class]]) return QTTopViewController(((UITabBarController *)vc).selectedViewController);
     return vc;
 }
 
@@ -90,10 +86,7 @@ static void QTShowResultPopup(NSString *translated) {
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Übersetzung"
                                                                 message:msg
                                                          preferredStyle:UIAlertControllerStyleAlert];
-
-    [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren"
-                                          style:UIAlertActionStyleDefault
-                                        handler:^(__unused UIAlertAction *a){
+    [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         UIPasteboard.generalPasteboard.string = msg;
     }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Schließen" style:UIAlertActionStyleCancel handler:nil]];
@@ -127,34 +120,56 @@ static void QTShowHUD(NSString *text) {
 
     CGFloat maxW = MIN(340.0, w.bounds.size.width - 40.0);
     CGSize maxSize = CGSizeMake(maxW, CGFLOAT_MAX);
-
-    CGRect r = [lbl.text boundingRectWithSize:maxSize
-                                      options:NSStringDrawingUsesLineFragmentOrigin
-                                   attributes:@{NSFontAttributeName: lbl.font}
-                                      context:nil];
+    CGRect r = [lbl.text boundingRectWithSize:maxSize options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName: lbl.font} context:nil];
 
     CGFloat padX = 16.0, padY = 10.0;
     CGFloat width = ceil(r.size.width) + padX * 2.0;
     CGFloat height = ceil(r.size.height) + padY * 2.0;
 
-    lbl.frame = CGRectMake((w.bounds.size.width - width)/2.0,
-                           w.safeAreaInsets.top + 18.0,
-                           width,
-                           height);
-
+    lbl.frame = CGRectMake((w.bounds.size.width - width)/2.0, w.safeAreaInsets.top + 18.0, width, height);
     [w addSubview:lbl];
 }
 
-#pragma mark - Screenshot
+#pragma mark - Screenshot + OCR normalization
+
+static UIImage *QTNormalizeForOCR(UIImage *src) {
+    if (!src) return nil;
+
+    CGFloat maxDim = 1280.0;
+    CGFloat w = src.size.width;
+    CGFloat h = src.size.height;
+    CGFloat m = MAX(w, h);
+
+    CGFloat scale = 1.0;
+    if (m > maxDim) scale = maxDim / m;
+
+    CGSize newSize = CGSizeMake(floor(w * scale), floor(h * scale));
+    if (newSize.width < 1 || newSize.height < 1) return src;
+
+    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+    fmt.opaque = YES;   // stable pixel format
+    fmt.scale = 1.0;    // avoid 3x huge images
+
+    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:newSize format:fmt];
+    UIImage *out = [r imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
+        [src drawInRect:(CGRect){CGPointZero, newSize}];
+    }];
+    return out;
+}
 
 static UIImage *QTScreenSnapshot(void) {
     UIWindow *w = QTGetKeyWindow();
     if (!w) return nil;
 
     CGSize size = w.bounds.size;
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size];
+    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+    fmt.opaque = YES;
+    fmt.scale = 1.0;
+
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:fmt];
     UIImage *img = [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
-        [w drawViewHierarchyInRect:(CGRect){CGPointZero, size} afterScreenUpdates:NO];
+        // more robust than drawViewHierarchy (reduces Vision -1 failures on overlays)
+        [w.layer renderInContext:UIGraphicsGetCurrentContext()];
     }];
     return img;
 }
@@ -162,14 +177,14 @@ static UIImage *QTScreenSnapshot(void) {
 #pragma mark - OCR (Vision)
 
 static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError *err)) {
-    if (!image || !image.CGImage) {
+    UIImage *norm = QTNormalizeForOCR(image);
+    if (!norm || !norm.CGImage) {
         if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Kein Bild für OCR"}]);
         return;
     }
 
     VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *request, NSError *error) {
         if (error) { if (completion) completion(nil, error); return; }
-
         NSMutableArray<NSString *> *lines = [NSMutableArray new];
         for (VNRecognizedTextObservation *obs in request.results) {
             VNRecognizedText *best = [[obs topCandidates:1] firstObject];
@@ -182,7 +197,7 @@ static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError 
     req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
     req.usesLanguageCorrection = YES;
 
-    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image.CGImage options:@{}];
+    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:norm.CGImage options:@{}];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *err = nil;
         [handler performRequests:@[req] error:&err];
@@ -190,7 +205,7 @@ static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError 
     });
 }
 
-#pragma mark - Network Helpers
+#pragma mark - Network helpers
 
 static NSURLSession *QTSession(void) {
     NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
@@ -215,16 +230,11 @@ static NSString *QTHTTPErrorMessage(NSHTTPURLResponse *http, id jsonObj, NSStrin
 
 #pragma mark - Providers
 
-// LibreTranslate: /translate, api_key optional
 static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
     NSString *base = (serverURL.length ? serverURL : @"https://translate.cutie.dating");
     while ([base hasSuffix:@"/"]) base = [base substringToIndex:base.length - 1];
-
     NSURL *url = [NSURL URLWithString:[base stringByAppendingString:@"/translate"]];
-    if (!url) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:101 userInfo:@{NSLocalizedDescriptionKey:@"LibreTranslate URL ungültig"}]);
-        return;
-    }
+    if (!url) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:101 userInfo:@{NSLocalizedDescriptionKey:@"LibreTranslate URL ungültig"}]); return; }
 
     NSString *q = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
     NSString *t = [target stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"de";
@@ -240,10 +250,10 @@ static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *t
     [req setValue:@"application/x-www-form-urlencoded; charset=utf-8" forHTTPHeaderField:@"Content-Type"];
     req.HTTPBody = [bodyStr dataUsingEncoding:NSUTF8StringEncoding];
 
-    NSURLSessionDataTask *task = [QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
+    [[QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
         if (error) { if (completion) completion(nil, error); return; }
-
         NSHTTPURLResponse *http = [resp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)resp : nil;
+
         NSError *parseErr = nil;
         id obj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&parseErr] : nil;
 
@@ -256,30 +266,21 @@ static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *t
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:102 userInfo:@{NSLocalizedDescriptionKey:@"LibreTranslate Antwort ungültig"}]);
             return;
         }
-
         NSString *translated = ((NSDictionary *)obj)[@"translatedText"];
         if (![translated isKindOfClass:[NSString class]] || translated.length == 0) {
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:103 userInfo:@{NSLocalizedDescriptionKey:@"LibreTranslate: keine Übersetzung"}]);
             return;
         }
         if (completion) completion(translated, nil);
-    }];
-    [task resume];
+    }] resume];
 }
 
-// DeepL: Authorization: DeepL-Auth-Key <key>
 static void QTTranslate_DeepL(NSString *authKey, BOOL pro, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
-    if (authKey.length == 0) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:201 userInfo:@{NSLocalizedDescriptionKey:@"DeepL Key fehlt"}]);
-        return;
-    }
+    if (authKey.length == 0) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:201 userInfo:@{NSLocalizedDescriptionKey:@"DeepL Key fehlt"}]); return; }
 
     NSString *host = pro ? @"https://api.deepl.com/v2/translate" : @"https://api-free.deepl.com/v2/translate";
     NSURL *url = [NSURL URLWithString:host];
-    if (!url) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:202 userInfo:@{NSLocalizedDescriptionKey:@"DeepL URL ungültig"}]);
-        return;
-    }
+    if (!url) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:202 userInfo:@{NSLocalizedDescriptionKey:@"DeepL URL ungültig"}]); return; }
 
     NSString *q = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
     NSString *tg = (target.length ? target : @"DE");
@@ -295,10 +296,10 @@ static void QTTranslate_DeepL(NSString *authKey, BOOL pro, NSString *text, NSStr
     [req setValue:[NSString stringWithFormat:@"DeepL-Auth-Key %@", authKey] forHTTPHeaderField:@"Authorization"];
     req.HTTPBody = [bodyStr dataUsingEncoding:NSUTF8StringEncoding];
 
-    NSURLSessionDataTask *task = [QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
+    [[QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
         if (error) { if (completion) completion(nil, error); return; }
-
         NSHTTPURLResponse *http = [resp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)resp : nil;
+
         NSError *parseErr = nil;
         id obj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&parseErr] : nil;
 
@@ -321,24 +322,16 @@ static void QTTranslate_DeepL(NSString *authKey, BOOL pro, NSString *text, NSStr
             return;
         }
         if (completion) completion(translated, nil);
-    }];
-    [task resume];
+    }] resume];
 }
 
-// Microsoft Translator v3
 static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
-    if (key.length == 0) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:301 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft Key fehlt"}]);
-        return;
-    }
+    if (key.length == 0) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:301 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft Key fehlt"}]); return; }
 
     NSString *to = [target stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"de";
     NSString *urlStr = [NSString stringWithFormat:@"https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=%@", to];
     NSURL *url = [NSURL URLWithString:urlStr];
-    if (!url) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:302 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft URL ungültig"}]);
-        return;
-    }
+    if (!url) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:302 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft URL ungültig"}]); return; }
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod = @"POST";
@@ -349,10 +342,10 @@ static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSSt
     NSArray *bodyArr = @[@{@"Text": (text ?: @"")}];
     req.HTTPBody = [NSJSONSerialization dataWithJSONObject:bodyArr options:0 error:nil];
 
-    NSURLSessionDataTask *task = [QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
+    [[QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
         if (error) { if (completion) completion(nil, error); return; }
-
         NSHTTPURLResponse *http = [resp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)resp : nil;
+
         NSError *parseErr = nil;
         id obj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&parseErr] : nil;
 
@@ -361,7 +354,6 @@ static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSSt
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:(int)http.statusCode userInfo:@{NSLocalizedDescriptionKey: msg}]);
             return;
         }
-
         if (parseErr || ![obj isKindOfClass:[NSArray class]] || ((NSArray *)obj).count == 0) {
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:303 userInfo:@{NSLocalizedDescriptionKey:@"Microsoft Antwort ungültig"}]);
             return;
@@ -377,35 +369,28 @@ static void QTTranslate_MS(NSString *key, NSString *region, NSString *text, NSSt
             return;
         }
         if (completion) completion(translated, nil);
-    }];
-    [task resume];
+    }] resume];
 }
 
-// Google Translate Cloud v2 (API key)
 static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
-    if (apiKey.length == 0) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:401 userInfo:@{NSLocalizedDescriptionKey:@"Google API Key fehlt"}]);
-        return;
-    }
+    if (apiKey.length == 0) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:401 userInfo:@{NSLocalizedDescriptionKey:@"Google API Key fehlt"}]); return; }
 
     NSString *k = [apiKey stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
     NSString *urlStr = [NSString stringWithFormat:@"https://translation.googleapis.com/language/translate/v2?key=%@", k];
     NSURL *url = [NSURL URLWithString:urlStr];
-    if (!url) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:402 userInfo:@{NSLocalizedDescriptionKey:@"Google URL ungültig"}]);
-        return;
-    }
+    if (!url) { if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:402 userInfo:@{NSLocalizedDescriptionKey:@"Google URL ungültig"}]); return; }
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod = @"POST";
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+
     NSDictionary *payload = @{@"q": (text ?: @""), @"target": (target ?: @"de"), @"format": @"text"};
     req.HTTPBody = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
 
-    NSURLSessionDataTask *task = [QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
+    [[QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
         if (error) { if (completion) completion(nil, error); return; }
-
         NSHTTPURLResponse *http = [resp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)resp : nil;
+
         NSError *parseErr = nil;
         id obj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&parseErr] : nil;
 
@@ -414,7 +399,6 @@ static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *tar
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:(int)http.statusCode userInfo:@{NSLocalizedDescriptionKey: msg}]);
             return;
         }
-
         if (parseErr || ![obj isKindOfClass:[NSDictionary class]]) {
             if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:403 userInfo:@{NSLocalizedDescriptionKey:@"Google Antwort ungültig"}]);
             return;
@@ -430,8 +414,7 @@ static void QTTranslate_GoogleV2(NSString *apiKey, NSString *text, NSString *tar
             return;
         }
         if (completion) completion(translated, nil);
-    }];
-    [task resume];
+    }] resume];
 }
 
 #pragma mark - Provider chain + fallback
@@ -449,7 +432,7 @@ static NSArray<NSString *> *QTProviderChain(void) {
 }
 
 static BOOL QTProviderIsConfigured(NSString *provider) {
-    if ([provider isEqualToString:@"libre"]) return YES; // server kann public sein
+    if ([provider isEqualToString:@"libre"]) return YES;
     if ([provider isEqualToString:@"deepl"]) return QTGetString(@"deeplKey", @"").length > 0;
     if ([provider isEqualToString:@"microsoft"]) return QTGetString(@"msKey", @"").length > 0;
     if ([provider isEqualToString:@"google"]) return QTGetString(@"googleKey", @"").length > 0;
@@ -458,29 +441,28 @@ static BOOL QTProviderIsConfigured(NSString *provider) {
 
 static void QTTranslate_WithProvider(NSString *provider, NSString *text, NSString *target, void (^completion)(NSString *, NSError *)) {
     if ([provider isEqualToString:@"libre"]) {
-        NSString *server = QTGetString(@"ltServer", @"https://translate.cutie.dating");
-        NSString *key = QTGetString(@"ltApiKey", @"");
-        QTTranslate_Libre(server, key, text, target, completion);
+        QTTranslate_Libre(QTGetString(@"ltServer", @"https://translate.cutie.dating"),
+                          QTGetString(@"ltApiKey", @""),
+                          text, target, completion);
         return;
     }
     if ([provider isEqualToString:@"deepl"]) {
-        NSString *key = QTGetString(@"deeplKey", @"");
-        BOOL pro = QTGetBool(@"deeplPro", NO);
-        QTTranslate_DeepL(key, pro, text, target, completion);
+        QTTranslate_DeepL(QTGetString(@"deeplKey", @""),
+                          QTGetBool(@"deeplPro", NO),
+                          text, target, completion);
         return;
     }
     if ([provider isEqualToString:@"microsoft"]) {
-        NSString *key = QTGetString(@"msKey", @"");
-        NSString *region = QTGetString(@"msRegion", @"");
-        QTTranslate_MS(key, region, text, target, completion);
+        QTTranslate_MS(QTGetString(@"msKey", @""),
+                       QTGetString(@"msRegion", @""),
+                       text, target, completion);
         return;
     }
     if ([provider isEqualToString:@"google"]) {
-        NSString *key = QTGetString(@"googleKey", @"");
-        QTTranslate_GoogleV2(key, text, target, completion);
+        QTTranslate_GoogleV2(QTGetString(@"googleKey", @""),
+                             text, target, completion);
         return;
     }
-
     if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:999 userInfo:@{NSLocalizedDescriptionKey:@"Unbekannter Anbieter"}]);
 }
 
@@ -491,7 +473,6 @@ static void QTTranslate_WithFallbacks(NSArray<NSString *> *chain, NSInteger idx,
     }
 
     NSString *p = chain[idx];
-
     if (!QTProviderIsConfigured(p)) {
         QTTranslate_WithFallbacks(chain, idx + 1, text, target, completion);
         return;
@@ -523,30 +504,21 @@ static void QTTranslateVisibleScreen(void) {
 
     UIImage *snap = QTScreenSnapshot();
     if (!snap) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            QTHideHUD();
-            QTShowAlert(@"QuickTranslate", @"Screenshot fehlgeschlagen.");
-        });
+        dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); QTShowAlert(@"QuickTranslate", @"Screenshot fehlgeschlagen."); });
         gQTBusy = NO;
         return;
     }
 
     QTRunOCR(snap, ^(NSString *text, NSError *err) {
         if (err) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                QTHideHUD();
-                QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler");
-            });
+            dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler"); });
             gQTBusy = NO;
             return;
         }
 
         NSString *trim = [(text ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (trim.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                QTHideHUD();
-                QTShowAlert(@"QuickTranslate", @"Kein Text erkannt.");
-            });
+            dispatch_async(dispatch_get_main_queue(), ^{ QTHideHUD(); QTShowAlert(@"QuickTranslate", @"Kein Text erkannt."); });
             gQTBusy = NO;
             return;
         }
@@ -560,25 +532,21 @@ static void QTTranslateVisibleScreen(void) {
         QTTranslate_WithFallbacks(chain, 0, trim, target, ^(NSString *translated, NSError *tErr) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 QTHideHUD();
-                if (tErr) {
-                    QTShowAlert(@"Übersetzung fehlgeschlagen", tErr.localizedDescription ?: @"Unbekannter Fehler");
-                } else {
-                    QTShowResultPopup(translated);
-                }
+                if (tErr) QTShowAlert(@"Übersetzung fehlgeschlagen", tErr.localizedDescription ?: @"Unbekannter Fehler");
+                else QTShowResultPopup(translated);
             });
             gQTBusy = NO;
         });
     });
 }
 
-#pragma mark - Button (draggable + reliable tap)
+#pragma mark - Floating button
 
 static void QTInstallFloatingButton(void);
 
 @interface UIView (QTDrag)
 - (void)qt_pan:(UIPanGestureRecognizer *)gr;
 @end
-
 @implementation UIView (QTDrag)
 - (void)qt_pan:(UIPanGestureRecognizer *)gr {
     UIView *v = gr.view;
@@ -592,11 +560,8 @@ static void QTInstallFloatingButton(void);
 @interface UIWindow (QTFallbackTap)
 - (void)qt_fallbackTap;
 @end
-
 @implementation UIWindow (QTFallbackTap)
-- (void)qt_fallbackTap {
-    QTTranslateVisibleScreen();
-}
+- (void)qt_fallbackTap { QTTranslateVisibleScreen(); }
 @end
 
 static void QTInstallFloatingButton(void) {
@@ -624,7 +589,7 @@ static void QTInstallFloatingButton(void) {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:btn action:@selector(qt_pan:)];
         [btn addGestureRecognizer:pan];
 
-        // zuverlässig in allen Apps
+        // reliable tap everywhere
         [btn addTarget:w action:@selector(qt_fallbackTap) forControlEvents:UIControlEventTouchUpInside];
 
         [w addSubview:btn];
@@ -636,14 +601,10 @@ static void QTInstallFloatingButton(void) {
 %hook UIApplication
 - (void)applicationDidBecomeActive:(id)application {
     %orig;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        QTInstallFloatingButton();
-    });
+    dispatch_async(dispatch_get_main_queue(), ^{ QTInstallFloatingButton(); });
 }
 %end
 
 %ctor {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        QTInstallFloatingButton();
-    });
+    dispatch_async(dispatch_get_main_queue(), ^{ QTInstallFloatingButton(); });
 }
