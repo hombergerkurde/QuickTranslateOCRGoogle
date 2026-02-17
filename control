@@ -1,9 +1,9 @@
 Package: 1.com.quicktranslate.prefsfixed
-Name: QuickTranslate (OCR + Google)
-Depends: preferenceloader, com.opa334.altlist
-Version: 1.0.0
+Name: QuickTranslate
+Version: 1.0.1
 Architecture: iphoneos-arm64
-Description: Floating translate button (no selection) using Vision OCR + Google Translate API. Includes AltList whitelist.
+Description: QuickTranslate (OCR + LibreTranslate) rootless/nathanlr/ElleKit
 Maintainer: Zaxooo
 Author: Zaxooo
 Section: Tweaks
+Depends: preferenceloader, com.opa334.altlist
