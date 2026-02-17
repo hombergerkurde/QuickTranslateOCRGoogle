@@ -339,6 +339,7 @@ static void QTTranslateVisibleScreen(void) {
         NSString *trim = [[text ?: @""]
                           stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
+
         if (trim.length == 0) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 QTHideHUD();
