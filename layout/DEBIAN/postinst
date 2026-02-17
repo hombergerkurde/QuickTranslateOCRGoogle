@@ -1,4 +1,5 @@
 #!/bin/sh
+# Rootless: refresh Settings list and SpringBoard
 killall -9 Preferences 2>/dev/null || true
 killall -9 SpringBoard 2>/dev/null || true
 exit 0

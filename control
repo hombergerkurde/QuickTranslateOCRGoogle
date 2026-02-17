@@ -1,9 +1,9 @@
-Package: 1.com.quicktranslate.prefsfixed
+Package: com.hombergerkurde.quicktranslate
 Name: QuickTranslate
-Version: 1.0.1
+Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: QuickTranslate (OCR + LibreTranslate) rootless/nathanlr/ElleKit
-Maintainer: Zaxooo
-Author: Zaxooo
+Description: Floating translate button with OCR + multi-provider fallback.
+Maintainer: You
+Author: You
 Section: Tweaks
-Depends: preferenceloader, com.opa334.altlist
+Depends: preferenceloader, mobilesubstrate

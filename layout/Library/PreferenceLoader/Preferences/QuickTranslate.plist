@@ -2,20 +2,170 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+
   <key>entry</key>
   <dict>
-    <key>bundle</key>
-    <string>QuickTranslatePrefs</string>
-    <key>cell</key>
-    <string>PSLinkCell</string>
-    <key>detail</key>
-    <string>QuickTranslatePrefsRootListController</string>
-    <key>icon</key>
-    <string>icon</string>
-    <key>isController</key>
-    <true/>
-    <key>label</key>
-    <string>QuickTranslate</string>
+    <key>cell</key><string>PSLinkCell</string>
+    <key>label</key><string>QuickTranslate</string>
   </dict>
+
+  <key>title</key>
+  <string>QuickTranslate</string>
+
+  <key>items</key>
+  <array>
+
+    <dict>
+      <key>cell</key><string>PSSwitchCell</string>
+      <key>label</key><string>Aktiviert</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>enabled</string>
+      <key>default</key><true/>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSGroupCell</string>
+      <key>label</key><string>Anbieter Reihenfolge</string>
+      <key>footerText</key><string>Primär wird zuerst versucht. Wenn es fehlschlägt oder kein Key vorhanden ist, wird Fallback 1 / 2 versucht.</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSMultiValueCell</string>
+      <key>label</key><string>Primär</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>providerPrimary</string>
+      <key>default</key><string>libre</string>
+      <key>values</key>
+      <array><string>libre</string><string>deepl</string><string>microsoft</string><string>google</string></array>
+      <key>titles</key>
+      <array><string>LibreTranslate</string><string>DeepL</string><string>Microsoft Translator</string><string>Google Translate (Cloud v2)</string></array>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSMultiValueCell</string>
+      <key>label</key><string>Fallback 1</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>providerFallback1</string>
+      <key>default</key><string>deepl</string>
+      <key>values</key>
+      <array><string>libre</string><string>deepl</string><string>microsoft</string><string>google</string><string>off</string></array>
+      <key>titles</key>
+      <array><string>LibreTranslate</string><string>DeepL</string><string>Microsoft Translator</string><string>Google Translate (Cloud v2)</string><string>Aus</string></array>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSMultiValueCell</string>
+      <key>label</key><string>Fallback 2</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>providerFallback2</string>
+      <key>default</key><string>microsoft</string>
+      <key>values</key>
+      <array><string>libre</string><string>deepl</string><string>microsoft</string><string>google</string><string>off</string></array>
+      <key>titles</key>
+      <array><string>LibreTranslate</string><string>DeepL</string><string>Microsoft Translator</string><string>Google Translate (Cloud v2)</string><string>Aus</string></array>
+    </dict>
+
+    <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Sprache</string></dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>Zielsprache</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>targetLang</string>
+      <key>default</key><string>de</string>
+      <key>placeholder</key><string>de</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
+    </dict>
+
+    <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>LibreTranslate</string></dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>Server URL</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>ltServer</string>
+      <key>default</key><string>https://translate.cutie.dating</string>
+      <key>placeholder</key><string>https://…</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>api_key (optional)</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>ltApiKey</string>
+      <key>default</key><string></string>
+      <key>placeholder</key><string>leer = ohne Key</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
+    </dict>
+
+    <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>DeepL</string></dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>Auth Key</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>deeplKey</string>
+      <key>default</key><string></string>
+      <key>placeholder</key><string>deepl auth key</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSSwitchCell</string>
+      <key>label</key><string>DeepL Pro (sonst Free)</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>deeplPro</string>
+      <key>default</key><false/>
+    </dict>
+
+    <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Microsoft Translator</string></dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>Subscription Key</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>msKey</string>
+      <key>default</key><string></string>
+      <key>placeholder</key><string>azure translator key</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>Region (optional)</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>msRegion</string>
+      <key>default</key><string></string>
+      <key>placeholder</key><string>westeurope</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
+    </dict>
+
+    <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Google Translate (Cloud v2)</string></dict>
+
+    <dict>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>API Key</string>
+      <key>defaults</key><string>com.hombergerkurde.quicktranslate</string>
+      <key>key</key><string>googleKey</string>
+      <key>default</key><string></string>
+      <key>placeholder</key><string>google api key</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSGroupCell</string>
+      <key>footerText</key><string>Button drücken → OCR ganzer Screen → Übersetzen → Popup.</string>
+    </dict>
+
+  </array>
+
 </dict>
 </plist>
