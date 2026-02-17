@@ -4,8 +4,11 @@
 <dict>
   <key>title</key>
   <string>QuickTranslate</string>
+
   <key>items</key>
   <array>
+
+    <!-- Main toggle -->
     <dict>
       <key>cell</key><string>PSSwitchCell</string>
       <key>label</key><string>Aktiviert</string>
@@ -14,6 +17,7 @@
       <key>default</key><true/>
     </dict>
 
+    <!-- Whitelist toggle -->
     <dict>
       <key>cell</key><string>PSSwitchCell</string>
       <key>label</key><string>Nur in ausgewählten Apps</string>
@@ -22,37 +26,56 @@
       <key>default</key><false/>
     </dict>
 
+    <!-- AltList app selector -->
     <dict>
       <key>cell</key><string>PSLinkCell</string>
-      <key>label</key><string>Apps auswählen…</string>
-      <key>detail</key><string>ATLApplicationListMultiSelectionController</string>
+      <key>label</key><string>Apps auswählen</string>
+      <key>detail</key><string>ATLApplicationListSubcontroller</string>
+
       <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
       <key>key</key><string>whitelist</string>
-      <key>excludeSystemApps</key><true/>
-      <key>enabledKey</key><string>useWhitelist</string>
+
+      <key>ALSettingsKey</key><string>whitelist</string>
+      <key>ALSettingsPath</key><string>/var/mobile/Library/Preferences/1.com.quicktranslate.prefsfixed.plist</string>
     </dict>
 
+    <!-- Separator -->
     <dict>
       <key>cell</key><string>PSGroupCell</string>
-      <key>label</key><string>Google Translate</string>
+      <key>label</key><string>Übersetzung</string>
     </dict>
 
+    <!-- LibreTranslate server -->
     <dict>
-      <key>cell</key><string>PSSecureEditTextCell</string>
-      <key>label</key><string>API Key</string>
+      <key>cell</key><string>PSTextFieldCell</string>
+      <key>label</key><string>LibreTranslate Server</string>
       <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
-      <key>key</key><string>googleApiKey</string>
-      <key>placeholder</key><string>Dein Google API Key</string>
+      <key>key</key><string>ltServer</string>
+      <key>default</key><string>https://translate.cutie.dating</string>
+      <key>placeholder</key><string>https://translate.cutie.dating</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
     </dict>
 
+    <!-- Target language -->
     <dict>
-      <key>cell</key><string>PSEditTextCell</string>
+      <key>cell</key><string>PSTextFieldCell</string>
       <key>label</key><string>Zielsprache</string>
       <key>defaults</key><string>1.com.quicktranslate.prefsfixed</string>
       <key>key</key><string>targetLang</string>
       <key>default</key><string>de</string>
-      <key>placeholder</key><string>de, en, tr …</string>
+      <key>placeholder</key><string>de</string>
+      <key>autoCaps</key><string>none</string>
+      <key>autoCorrect</key><string>no</string>
     </dict>
+
+    <!-- Info -->
+    <dict>
+      <key>cell</key><string>PSGroupCell</string>
+      <key>footerText</key>
+      <string>Button drücken → OCR ganzer Screen → Übersetzung → Popup (Kopieren/Schließen).</string>
+    </dict>
+
   </array>
 </dict>
 </plist>
