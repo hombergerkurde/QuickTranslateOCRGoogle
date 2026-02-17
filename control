@@ -2,8 +2,8 @@ Package: com.hombergerkurde.quicktranslate
 Name: QuickTranslate
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: QuickTranslate - inline translate buttons + settings
-Maintainer: You
-Author: You
+Description: Quick translate button (rootless)
+Maintainer: hombergerkurde
+Author: hombergerkurde
 Section: Tweaks
 Depends: preferenceloader

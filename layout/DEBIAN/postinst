@@ -1,3 +1,19 @@
 #!/bin/sh
-killall -9 Preferences 2>/dev/null || true
+set -e
+
+# Rootless paths
+DYLIB_SRC="/var/jb/Library/MobileSubstrate/DynamicLibraries/QuickTranslate.dylib"
+PLIST_SRC="/var/jb/Library/MobileSubstrate/DynamicLibraries/QuickTranslate.plist"
+
+INJ_DIR="/var/jb/usr/lib/TweakInject"
+
+if [ -d "$INJ_DIR" ]; then
+  if [ -f "$DYLIB_SRC" ]; then
+    cp -f "$DYLIB_SRC" "$INJ_DIR/QuickTranslate.dylib" || true
+  fi
+  if [ -f "$PLIST_SRC" ]; then
+    cp -f "$PLIST_SRC" "$INJ_DIR/QuickTranslate.plist" || true
+  fi
+fi
+
 exit 0
