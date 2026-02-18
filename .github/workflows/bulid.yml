@@ -16,35 +16,34 @@ jobs:
       - name: Set up Theos
         run: |
           set -e
-          echo "Cloning Theos..."
-          git clone --recursive https://github.com/theos/theos.git $HOME/theos
-          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
 
       - name: Install SDKs (iPhoneOS)
         run: |
           set -e
           mkdir -p "$THEOS/sdks"
-          # iOS 16.5 SDK (sehr kompatibel für iOS 15-17 Tweaks)
-          curl -L -o /tmp/iPhoneOS16.5.sdk.tar.xz https://github.com/theos/sdks/releases/download/2024.02.10/iPhoneOS16.5.sdk.tar.xz
-          tar -xf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
+
+          SDK_URL="https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
+          echo "Downloading SDK: $SDK_URL"
+
+          # -f = fail on 404/HTML, -L follow redirects
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/iPhoneOS16.5.sdk.tar.xz "$SDK_URL"
+
+          # sanity: should NOT be HTML/text
+          file /tmp/iPhoneOS16.5.sdk.tar.xz || true
+
+          # -xJf = tar + xz
+          tar -xJf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
           ls -la "$THEOS/sdks"
 
       - name: Fix maintainer script permissions
         run: |
           set -e
-          # Wichtig: sonst dpkg error "postinst has bad permissions"
-          if [ -f "layout/DEBIAN/postinst" ]; then
-            chmod 755 layout/DEBIAN/postinst || true
-          fi
-          if [ -f "layout/DEBIAN/prerm" ]; then
-            chmod 755 layout/DEBIAN/prerm || true
-          fi
-          if [ -f "layout/DEBIAN/preinst" ]; then
-            chmod 755 layout/DEBIAN/preinst || true
-          fi
-          if [ -f "layout/DEBIAN/postrm" ]; then
-            chmod 755 layout/DEBIAN/postrm || true
-          fi
+          [ -f "layout/DEBIAN/postinst" ] && chmod 755 layout/DEBIAN/postinst || true
+          [ -f "layout/DEBIAN/preinst" ] && chmod 755 layout/DEBIAN/preinst || true
+          [ -f "layout/DEBIAN/prerm" ] && chmod 755 layout/DEBIAN/prerm || true
+          [ -f "layout/DEBIAN/postrm" ] && chmod 755 layout/DEBIAN/postrm || true
 
       - name: Build package
         run: |
