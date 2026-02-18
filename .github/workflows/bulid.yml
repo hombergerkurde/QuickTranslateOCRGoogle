@@ -1,6 +1,8 @@
-name: Build DEB (rootless)
+name: Build (Theos)
 
 on:
+  push:
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
@@ -11,35 +13,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build deps
+      - name: Set up Theos
         run: |
-          brew install ldid dpkg make
-
-      - name: Install Theos
-        run: |
+          set -e
+          echo "Cloning Theos..."
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      # ✅ FIX: make postinst executable so dpkg-deb doesn't fail
-      - name: Fix postinst permissions
+      - name: Install SDKs (iPhoneOS)
         run: |
+          set -e
+          mkdir -p "$THEOS/sdks"
+          # iOS 16.5 SDK (sehr kompatibel für iOS 15-17 Tweaks)
+          curl -L -o /tmp/iPhoneOS16.5.sdk.tar.xz https://github.com/theos/sdks/releases/download/2024.02.10/iPhoneOS16.5.sdk.tar.xz
+          tar -xf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
+          ls -la "$THEOS/sdks"
+
+      - name: Fix maintainer script permissions
+        run: |
+          set -e
+          # Wichtig: sonst dpkg error "postinst has bad permissions"
           if [ -f "layout/DEBIAN/postinst" ]; then
-            chmod 755 layout/DEBIAN/postinst
-            ls -la layout/DEBIAN/postinst
-          elif [ -f "DEBIAN/postinst" ]; then
-            chmod 755 DEBIAN/postinst
-            ls -la DEBIAN/postinst
-          else
-            echo "No postinst found, skipping."
+            chmod 755 layout/DEBIAN/postinst || true
+          fi
+          if [ -f "layout/DEBIAN/prerm" ]; then
+            chmod 755 layout/DEBIAN/prerm || true
+          fi
+          if [ -f "layout/DEBIAN/preinst" ]; then
+            chmod 755 layout/DEBIAN/preinst || true
+          fi
+          if [ -f "layout/DEBIAN/postrm" ]; then
+            chmod 755 layout/DEBIAN/postrm || true
           fi
 
-      - name: Build rootless package
+      - name: Build package
         run: |
-          export THEOS=$THEOS
-          make clean package THEOS_PACKAGE_SCHEME=rootless
+          set -e
+          export THEOS="$THEOS"
+          make clean
+          make package FINALPACKAGE=1
 
-      - name: Upload DEB artifact
+      - name: Upload .deb
         uses: actions/upload-artifact@v4
         with:
           name: deb
-          path: packages/*.deb
+          path: |
+            packages/*.deb
+            *.deb
