@@ -1,19 +1,36 @@
 #!/bin/sh
 set -e
 
-# Rootless paths
-DYLIB_SRC="/var/jb/Library/MobileSubstrate/DynamicLibraries/QuickTranslate.dylib"
-PLIST_SRC="/var/jb/Library/MobileSubstrate/DynamicLibraries/QuickTranslate.plist"
+JBROOT="/var/jb"
 
-INJ_DIR="/var/jb/usr/lib/TweakInject"
+DL_DIR="$JBROOT/Library/MobileSubstrate/DynamicLibraries"
+TI_DIR="$JBROOT/usr/lib/TweakInject"
 
-if [ -d "$INJ_DIR" ]; then
-  if [ -f "$DYLIB_SRC" ]; then
-    cp -f "$DYLIB_SRC" "$INJ_DIR/QuickTranslate.dylib" || true
+SRC_DYLIB="$DL_DIR/QuickTranslate.dylib"
+SRC_PLIST="$DL_DIR/QuickTranslate.plist"
+DST_DYLIB="$TI_DIR/QuickTranslate.dylib"
+DST_PLIST="$TI_DIR/QuickTranslate.plist"
+
+# Falls DynamicLibraries noch nicht existiert
+mkdir -p "$DL_DIR"
+
+# Nur kopieren, wenn Source existiert
+if [ -f "$SRC_DYLIB" ] && [ -f "$SRC_PLIST" ]; then
+  # TweakInject only if folder exists or can be created
+  mkdir -p "$TI_DIR"
+
+  # Nur kopieren, wenn es NICHT die gleiche Datei ist
+  if [ "$(readlink -f "$SRC_DYLIB" 2>/dev/null || echo "$SRC_DYLIB")" != "$(readlink -f "$DST_DYLIB" 2>/dev/null || echo "$DST_DYLIB")" ]; then
+    cp -f "$SRC_DYLIB" "$DST_DYLIB" || true
   fi
-  if [ -f "$PLIST_SRC" ]; then
-    cp -f "$PLIST_SRC" "$INJ_DIR/QuickTranslate.plist" || true
+
+  if [ "$(readlink -f "$SRC_PLIST" 2>/dev/null || echo "$SRC_PLIST")" != "$(readlink -f "$DST_PLIST" 2>/dev/null || echo "$DST_PLIST")" ]; then
+    cp -f "$SRC_PLIST" "$DST_PLIST" || true
   fi
 fi
+
+# Reload UI
+killall -9 Preferences 2>/dev/null || true
+killall -9 SpringBoard 2>/dev/null || true
 
 exit 0
