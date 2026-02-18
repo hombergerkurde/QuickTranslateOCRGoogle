@@ -1,5 +1,29 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <Vision/Vision.h>
+
+static NSString * const kPrefsDomain = @"com.hombergerkurde.quicktranslate";
+static const NSInteger kQTButtonTag = 987654;
+static const NSInteger kQTHUDTag = 998877;
+
+#pragma mark - Prefs
+
+static NSDictionary *QTGetPrefs(void) {
+    NSDictionary *d = [[NSUserDefaults standardUserDefaults] persistentDomainForName:kPrefsDomain];
+    return [d isKindOfClass:[NSDictionary class]] ? d : @{};
+}
+
+static NSString *QTGetString(NSString *key, NSString *def) {
+    id v = QTGetPrefs()[key];
+    return [v isKindOfClass:[NSString class]] ? (NSString *)v : def;
+}
+
+static BOOL QTGetBool(NSString *key, BOOL def) {
+    id v = QTGetPrefs()[key];
+    return v ? [v boolValue] : def;
+}
+
+#pragma mark - Window
 
 static UIWindow *QTGetKeyWindow(void) {
     UIApplication *app = UIApplication.sharedApplication;
@@ -21,7 +45,6 @@ static UIWindow *QTGetKeyWindow(void) {
             UIWindowScene *ws = (UIWindowScene *)scene;
             if (ws.windows.count > 0) return ws.windows.firstObject;
         }
-
         return nil;
     }
 
@@ -31,12 +54,35 @@ static UIWindow *QTGetKeyWindow(void) {
 #pragma clang diagnostic pop
 }
 
-static void QTShowToast(NSString *msg) {
+static UIViewController *QTTopViewController(UIViewController *vc) {
+    if (!vc) return nil;
+    while (vc.presentedViewController) vc = vc.presentedViewController;
+    if ([vc isKindOfClass:[UINavigationController class]]) {
+        return QTTopViewController(((UINavigationController *)vc).topViewController);
+    }
+    if ([vc isKindOfClass:[UITabBarController class]]) {
+        return QTTopViewController(((UITabBarController *)vc).selectedViewController);
+    }
+    return vc;
+}
+
+#pragma mark - HUD / UI
+
+static void QTHideHUD(void) {
     UIWindow *w = QTGetKeyWindow();
     if (!w) return;
+    UIView *hud = [w viewWithTag:kQTHUDTag];
+    if (hud) [hud removeFromSuperview];
+}
+
+static void QTShowHUD(NSString *text) {
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return;
+    QTHideHUD();
 
     UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectZero];
-    lbl.text = msg ?: @"QuickTranslate loaded";
+    lbl.tag = kQTHUDTag;
+    lbl.text = text ?: @"…";
     lbl.textColor = UIColor.whiteColor;
     lbl.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.75];
     lbl.textAlignment = NSTextAlignmentCenter;
@@ -45,7 +91,7 @@ static void QTShowToast(NSString *msg) {
     lbl.layer.cornerRadius = 12.0;
     lbl.clipsToBounds = YES;
 
-    CGFloat maxW = MIN(320.0, w.bounds.size.width - 40.0);
+    CGFloat maxW = MIN(340.0, w.bounds.size.width - 40.0);
     CGSize maxSize = CGSizeMake(maxW, CGFLOAT_MAX);
 
     CGRect r = [lbl.text boundingRectWithSize:maxSize
@@ -58,32 +104,310 @@ static void QTShowToast(NSString *msg) {
     CGFloat height = ceil(r.size.height) + padY * 2.0;
 
     lbl.frame = CGRectMake((w.bounds.size.width - width)/2.0,
-                           w.safeAreaInsets.top + 20.0,
+                           w.safeAreaInsets.top + 18.0,
                            width,
                            height);
 
     [w addSubview:lbl];
+}
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [UIView animateWithDuration:0.2 animations:^{
-            lbl.alpha = 0.0;
-        } completion:^(__unused BOOL finished) {
-            [lbl removeFromSuperview];
-        }];
+static void QTShowAlert(NSString *title, NSString *message) {
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return;
+    UIViewController *top = QTTopViewController(w.rootViewController);
+    if (!top) return;
+
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:(title ?: @"")
+                                                                message:(message ?: @"")
+                                                         preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [top presentViewController:ac animated:YES completion:nil];
+}
+
+static void QTShowResultPopup(NSString *translated) {
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return;
+    UIViewController *top = QTTopViewController(w.rootViewController);
+    if (!top) return;
+
+    NSString *msg = translated ?: @"";
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Übersetzung"
+                                                                message:msg
+                                                         preferredStyle:UIAlertControllerStyleAlert];
+
+    [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren"
+                                          style:UIAlertActionStyleDefault
+                                        handler:^(__unused UIAlertAction *a){
+        UIPasteboard.generalPasteboard.string = msg;
+    }]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"Schließen" style:UIAlertActionStyleCancel handler:nil]];
+    [top presentViewController:ac animated:YES completion:nil];
+}
+
+#pragma mark - Screenshot (stable)
+
+static UIImage *QTScreenSnapshot(void) {
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return nil;
+
+    CGSize size = w.bounds.size;
+
+    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+    fmt.opaque = YES;
+    fmt.scale = 1.0;
+
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:fmt];
+    UIImage *img = [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
+        [w.layer renderInContext:UIGraphicsGetCurrentContext()];
+    }];
+    return img;
+}
+
+static UIImage *QTNormalizeForOCR(UIImage *src) {
+    if (!src) return nil;
+
+    CGFloat maxDim = 1280.0;
+    CGFloat w = src.size.width;
+    CGFloat h = src.size.height;
+    CGFloat m = MAX(w, h);
+    CGFloat scale = (m > maxDim) ? (maxDim / m) : 1.0;
+
+    CGSize newSize = CGSizeMake(floor(w * scale), floor(h * scale));
+    if (newSize.width < 1 || newSize.height < 1) return src;
+
+    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+    fmt.opaque = YES;
+    fmt.scale = 1.0;
+
+    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:newSize format:fmt];
+    UIImage *out = [r imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
+        [src drawInRect:(CGRect){CGPointZero, newSize}];
+    }];
+    return out;
+}
+
+#pragma mark - OCR (Vision)
+
+static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError *err)) {
+    UIImage *norm = QTNormalizeForOCR(image);
+    if (!norm || !norm.CGImage) {
+        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Kein Bild für OCR"}]);
+        return;
+    }
+
+    VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *request, NSError *error) {
+        if (error) { if (completion) completion(nil, error); return; }
+
+        NSMutableArray<NSString *> *lines = [NSMutableArray new];
+        for (VNRecognizedTextObservation *obs in request.results) {
+            VNRecognizedText *best = [[obs topCandidates:1] firstObject];
+            if (best.string.length > 0) [lines addObject:best.string];
+        }
+        NSString *joined = [lines componentsJoinedByString:@"\n"];
+        if (completion) completion(joined, nil);
+    }];
+
+    req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+    req.usesLanguageCorrection = YES;
+
+    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:norm.CGImage options:@{}];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *err = nil;
+        [handler performRequests:@[req] error:&err];
+        if (err && completion) completion(nil, err);
     });
 }
+
+#pragma mark - LibreTranslate (no paid api required)
+
+static NSURLSession *QTSession(void) {
+    NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+    cfg.timeoutIntervalForRequest = 35.0;
+    cfg.timeoutIntervalForResource = 35.0;
+    return [NSURLSession sessionWithConfiguration:cfg];
+}
+
+static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *text, NSString *target,
+                             void (^completion)(NSString *translated, NSError *err)) {
+
+    NSString *base = (serverURL.length ? serverURL : @"https://translate.cutie.dating");
+    while ([base hasSuffix:@"/"]) base = [base substringToIndex:base.length - 1];
+
+    NSURL *url = [NSURL URLWithString:[base stringByAppendingString:@"/translate"]];
+    if (!url) {
+        if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:101 userInfo:@{NSLocalizedDescriptionKey:@"LibreTranslate URL ungültig"}]);
+        return;
+    }
+
+    NSString *q = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
+    NSString *t = [target stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"de";
+
+    NSMutableString *bodyStr = [NSMutableString stringWithFormat:@"q=%@&source=auto&target=%@&format=text", q, t];
+    if (apiKey.length) {
+        NSString *k = [apiKey stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
+        [bodyStr appendFormat:@"&api_key=%@", k];
+    }
+
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/x-www-form-urlencoded; charset=utf-8" forHTTPHeaderField:@"Content-Type"];
+    req.HTTPBody = [bodyStr dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSURLSessionDataTask *task = [QTSession() dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *error) {
+        if (error) { if (completion) completion(nil, error); return; }
+
+        NSHTTPURLResponse *http = [resp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)resp : nil;
+        if (http && http.statusCode >= 400) {
+            NSString *msg = [NSString stringWithFormat:@"LibreTranslate Fehler (HTTP %ld)", (long)http.statusCode];
+            if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:(int)http.statusCode userInfo:@{NSLocalizedDescriptionKey: msg}]);
+            return;
+        }
+
+        NSError *parseErr = nil;
+        id obj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&parseErr] : nil;
+        if (parseErr || ![obj isKindOfClass:[NSDictionary class]]) {
+            if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:102 userInfo:@{NSLocalizedDescriptionKey:@"LibreTranslate Antwort ungültig"}]);
+            return;
+        }
+
+        NSString *translated = ((NSDictionary *)obj)[@"translatedText"];
+        if (![translated isKindOfClass:[NSString class]] || translated.length == 0) {
+            if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:103 userInfo:@{NSLocalizedDescriptionKey:@"LibreTranslate: keine Übersetzung"}]);
+            return;
+        }
+        if (completion) completion(translated, nil);
+    }];
+    [task resume];
+}
+
+#pragma mark - Main action
+
+static BOOL gQTBusy = NO;
+
+static void QTTranslateVisibleScreen(void) {
+    if (gQTBusy) return;
+    if (!QTGetBool(@"enabled", YES)) return;
+    gQTBusy = YES;
+
+    NSString *target = QTGetString(@"targetLang", @"de");
+    target = [target stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (target.length == 0) target = @"de";
+
+    dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Erkenne Text…"); });
+
+    UIImage *snap = QTScreenSnapshot();
+    if (!snap) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            QTHideHUD();
+            QTShowAlert(@"QuickTranslate", @"Screenshot fehlgeschlagen.");
+        });
+        gQTBusy = NO;
+        return;
+    }
+
+    QTRunOCR(snap, ^(NSString *text, NSError *err) {
+        if (err) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                QTHideHUD();
+                QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler");
+            });
+            gQTBusy = NO;
+            return;
+        }
+
+        NSString *trim = [(text ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (trim.length == 0) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                QTHideHUD();
+                QTShowAlert(@"QuickTranslate", @"Kein Text erkannt.");
+            });
+            gQTBusy = NO;
+            return;
+        }
+
+        if (trim.length > 1400) trim = [trim substringToIndex:1400];
+
+        dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Übersetze…"); });
+
+        NSString *server = QTGetString(@"ltServer", @"https://translate.cutie.dating");
+        NSString *apiKey  = QTGetString(@"ltApiKey", @"");
+
+        QTTranslate_Libre(server, apiKey, trim, target, ^(NSString *translated, NSError *tErr) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                QTHideHUD();
+                if (tErr) QTShowAlert(@"Übersetzung fehlgeschlagen", tErr.localizedDescription ?: @"Unbekannter Fehler");
+                else QTShowResultPopup(translated);
+            });
+            gQTBusy = NO;
+        });
+    });
+}
+
+#pragma mark - Floating button (for now)
+
+static void QTInstallFloatingButton(void) {
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return;
+
+    BOOL enabled = QTGetBool(@"enabled", YES);
+    UIView *old = [w viewWithTag:kQTButtonTag];
+
+    if (!enabled) {
+        if (old) [old removeFromSuperview];
+        return;
+    }
+
+    UIButton *btn = (UIButton *)old;
+    if (!btn) {
+        btn = [UIButton buttonWithType:UIButtonTypeSystem];
+        btn.tag = kQTButtonTag;
+        [btn setTitle:@"🌐" forState:UIControlStateNormal];
+        btn.frame = CGRectMake(20, 220, 52, 52);
+        btn.layer.cornerRadius = 26.0;
+        btn.clipsToBounds = YES;
+        btn.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.92];
+
+        // drag
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:btn action:@selector(qt_pan:)];
+        [btn addGestureRecognizer:pan];
+
+        [btn addTarget:btn action:@selector(qt_tap) forControlEvents:UIControlEventTouchUpInside];
+
+        [w addSubview:btn];
+    }
+
+    [w bringSubviewToFront:btn];
+}
+
+@interface UIButton (QTBtn)
+- (void)qt_pan:(UIPanGestureRecognizer *)gr;
+- (void)qt_tap;
+@end
+
+@implementation UIButton (QTBtn)
+- (void)qt_pan:(UIPanGestureRecognizer *)gr {
+    UIView *v = gr.view;
+    if (!v) return;
+    CGPoint tr = [gr translationInView:v.superview];
+    v.center = CGPointMake(v.center.x + tr.x, v.center.y + tr.y);
+    [gr setTranslation:CGPointZero inView:v.superview];
+}
+- (void)qt_tap {
+    QTTranslateVisibleScreen();
+}
+@end
 
 %hook UIApplication
 - (void)applicationDidBecomeActive:(id)application {
     %orig;
     dispatch_async(dispatch_get_main_queue(), ^{
-        QTShowToast(@"QuickTranslate injected ✅");
+        QTInstallFloatingButton();
     });
 }
 %end
 
 %ctor {
     dispatch_async(dispatch_get_main_queue(), ^{
-        QTShowToast(@"QuickTranslate loaded ✅");
+        QTInstallFloatingButton();
     });
 }
