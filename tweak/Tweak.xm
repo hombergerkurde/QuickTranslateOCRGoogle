@@ -1,10 +1,11 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <NaturalLanguage/NaturalLanguage.h>
 
 static NSString * const kPrefsDomain = @"com.hombergerkurde.quicktranslate";
 
-// ---- Target apps (hard-coded) ----
+// ---- Target apps ----
 static BOOL QTIsTargetApp(void) {
     static dispatch_once_t onceToken;
     static NSSet<NSString *> *targets;
@@ -48,6 +49,7 @@ static UIWindow *QTGetKeyWindow(void) {
         for (UIScene *scene in app.connectedScenes) {
             if (scene.activationState != UISceneActivationStateForegroundActive) continue;
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+
             UIWindowScene *ws = (UIWindowScene *)scene;
             for (UIWindow *w in ws.windows) {
                 if (w.isKeyWindow) return w;
@@ -82,7 +84,7 @@ static UIViewController *QTTopViewController(UIViewController *vc) {
     return vc;
 }
 
-// ---- UI helpers ----
+// ---- HUD / Alerts ----
 static const NSInteger kQTHUDTag = 998877;
 
 static void QTHideHUD(void) {
@@ -150,10 +152,11 @@ static void QTShowResultPopup(NSString *translated) {
                                                                 message:msg
                                                          preferredStyle:UIAlertControllerStyleAlert];
 
-    [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+    [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren"
+                                          style:UIAlertActionStyleDefault
+                                        handler:^(__unused UIAlertAction *a){
         UIPasteboard.generalPasteboard.string = msg;
     }]];
-
     [ac addAction:[UIAlertAction actionWithTitle:@"Schließen" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:ac animated:YES completion:nil];
 }
@@ -219,88 +222,6 @@ static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *t
     [task resume];
 }
 
-// ---- Text extraction from a cell (NO OCR) ----
-static BOOL QTLooksLikeRealText(NSString *s) {
-    if (![s isKindOfClass:[NSString class]]) return NO;
-    NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (t.length < 2) return NO;
-
-    NSCharacterSet *letters = [NSCharacterSet letterCharacterSet];
-    if ([t rangeOfCharacterFromSet:letters].location == NSNotFound) return NO;
-
-    if ([t.lowercaseString isEqualToString:@"ok"]) return NO;
-    return YES;
-}
-
-static void QTCollectTextAndBounds(UIView *container, UIView *v, NSMutableArray<NSString *> *out, CGRect *boundsUnion, NSInteger depth) {
-    if (!v || depth > 14) return;
-
-    if (!v.window || v.hidden || v.alpha < 0.01) {
-        return;
-    }
-
-    NSString *text = nil;
-    if ([v isKindOfClass:[UILabel class]]) {
-        text = ((UILabel *)v).text;
-    } else if ([v isKindOfClass:[UITextView class]]) {
-        text = ((UITextView *)v).text;
-    } else if ([v isKindOfClass:[UITextField class]]) {
-        text = ((UITextField *)v).text;
-    }
-
-    if (QTLooksLikeRealText(text)) {
-        NSString *t = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        [out addObject:t];
-
-        if (container) {
-            CGRect r = [v convertRect:v.bounds toView:container];
-            if (!CGRectIsEmpty(r)) {
-                if (CGRectIsEmpty(*boundsUnion)) *boundsUnion = r;
-                else *boundsUnion = CGRectUnion(*boundsUnion, r);
-            }
-        }
-    }
-
-    for (UIView *sv in v.subviews) {
-        QTCollectTextAndBounds(container, sv, out, boundsUnion, depth + 1);
-    }
-}
-
-static NSString *QTExtractTextFromContainer(UIView *container, CGRect *textBoundsOut) {
-    NSMutableArray<NSString *> *chunks = [NSMutableArray new];
-    CGRect u = CGRectZero;
-    QTCollectTextAndBounds(container, container, chunks, &u, 0);
-
-    if (textBoundsOut) *textBoundsOut = u;
-
-    NSMutableOrderedSet<NSString *> *uniq = [NSMutableOrderedSet orderedSet];
-    for (NSString *s in chunks) {
-        if (s.length) [uniq addObject:s];
-    }
-
-    NSString *joined = [[uniq array] componentsJoinedByString:@"\n"];
-    joined = [joined stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (joined.length > 1400) joined = [joined substringToIndex:1400];
-    return joined;
-}
-
-// ---- Inline translate button ----
-static char kQTInlineBtnKey;
-
-@interface QTInlineButton : UIButton
-@end
-@implementation QTInlineButton
-@end
-
-static UIImage *QTButtonImage(void) {
-    if (@available(iOS 13.0, *)) {
-        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightSemibold];
-        UIImage *img = [UIImage systemImageNamed:@"globe" withConfiguration:cfg];
-        if (img) return img;
-    }
-    return nil;
-}
-
 static void QTTranslateText(NSString *text) {
     if (!QTGetBool(@"enabled", YES)) return;
 
@@ -309,6 +230,7 @@ static void QTTranslateText(NSString *text) {
         QTShowAlert(@"QuickTranslate", @"Kein Text gefunden.");
         return;
     }
+    if (trim.length > 1400) trim = [trim substringToIndex:1400];
 
     NSString *target = QTGetString(@"targetLang", @"de");
     target = [target stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -325,6 +247,98 @@ static void QTTranslateText(NSString *text) {
             else QTShowResultPopup(translated);
         });
     });
+}
+
+// ---- Language filter (NaturalLanguage) ----
+static BOOL QTShouldShowForText(NSString *text) {
+    // allow override from prefs
+    BOOL always = QTGetBool(@"alwaysShowButton", NO);
+    if (always) return YES;
+
+    NSString *trim = [text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trim.length < 3) return NO;
+
+    NSString *target = QTGetString(@"targetLang", @"de");
+    target = [[target lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (target.length == 0) target = @"de";
+
+    // detect language
+    NLLanguageRecognizer *rec = [NLLanguageRecognizer new];
+    [rec processString:trim];
+    NLLanguage lang = rec.dominantLanguage;
+    if (!lang) return YES; // if uncertain, show
+
+    NSString *det = [lang lowercaseString];
+    // If detected == target -> hide (looks already in target language)
+    if (det.length && [det hasPrefix:target]) {
+        return NO;
+    }
+    return YES;
+}
+
+// ---- Text extraction from a cell ----
+static BOOL QTLooksLikeRealText(NSString *s) {
+    if (![s isKindOfClass:[NSString class]]) return NO;
+    NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (t.length < 2) return NO;
+    if ([t.lowercaseString isEqualToString:@"ok"]) return NO;
+
+    // require at least one letter
+    if ([t rangeOfCharacterFromSet:[NSCharacterSet letterCharacterSet]].location == NSNotFound) return NO;
+    return YES;
+}
+
+static void QTCollectText(UIView *v, NSMutableArray<NSString *> *out, NSInteger depth) {
+    if (!v || depth > 14) return;
+    if (!v.window || v.hidden || v.alpha < 0.01) return;
+
+    NSString *text = nil;
+    if ([v isKindOfClass:[UILabel class]]) {
+        text = ((UILabel *)v).text;
+    } else if ([v isKindOfClass:[UITextView class]]) {
+        text = ((UITextView *)v).text;
+    } else if ([v isKindOfClass:[UITextField class]]) {
+        text = ((UITextField *)v).text;
+    }
+
+    if (QTLooksLikeRealText(text)) {
+        NSString *t = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (t.length) [out addObject:t];
+    }
+
+    for (UIView *sv in v.subviews) {
+        QTCollectText(sv, out, depth + 1);
+    }
+}
+
+static NSString *QTExtractTextFromContainer(UIView *container) {
+    NSMutableArray<NSString *> *chunks = [NSMutableArray new];
+    QTCollectText(container, chunks, 0);
+
+    NSMutableOrderedSet<NSString *> *uniq = [NSMutableOrderedSet orderedSet];
+    for (NSString *s in chunks) {
+        if (s.length) [uniq addObject:s];
+    }
+
+    NSString *joined = [[uniq array] componentsJoinedByString:@"\n"];
+    return [joined stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+// ---- Inline button ----
+static char kQTInlineBtnKey;
+
+@interface QTInlineButton : UIButton
+@end
+@implementation QTInlineButton
+@end
+
+static UIImage *QTButtonImage(void) {
+    if (@available(iOS 13.0, *)) {
+        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightSemibold];
+        UIImage *img = [UIImage systemImageNamed:@"globe" withConfiguration:cfg];
+        if (img) return img;
+    }
+    return nil;
 }
 
 static UIView *QTFindHostCell(UIView *v) {
@@ -348,8 +362,7 @@ static void QTInlineButtonTapped(QTInlineButton *btn) {
     }
     if (!container) return;
 
-    CGRect tb = CGRectZero;
-    NSString *text = QTExtractTextFromContainer(container, &tb);
+    NSString *text = QTExtractTextFromContainer(container);
     QTTranslateText(text);
 }
 
@@ -367,6 +380,14 @@ static void QTEnsureInlineButtonForContainer(UIView *container) {
     if (!QTIsTargetApp()) return;
     if (!QTGetBool(@"enabled", YES)) return;
 
+    NSString *txt = QTExtractTextFromContainer(container);
+    if (!QTShouldShowForText(txt)) {
+        QTInlineButton *existing = objc_getAssociatedObject(container, &kQTInlineBtnKey);
+        if (existing) [existing removeFromSuperview];
+        objc_setAssociatedObject(container, &kQTInlineBtnKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        return;
+    }
+
     QTInlineButton *btn = objc_getAssociatedObject(container, &kQTInlineBtnKey);
     if (!btn) {
         btn = [QTInlineButton buttonWithType:UIButtonTypeSystem];
@@ -374,7 +395,6 @@ static void QTEnsureInlineButtonForContainer(UIView *container) {
         btn.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.70];
         btn.layer.cornerRadius = 12.0;
         btn.clipsToBounds = YES;
-        
         btn.exclusiveTouch = YES;
 
         UIImage *img = QTButtonImage();
@@ -386,27 +406,14 @@ static void QTEnsureInlineButtonForContainer(UIView *container) {
         [container addSubview:btn];
     }
 
-    // Position: "under" the main text block.
-    CGRect tb = CGRectZero;
-    (void)QTExtractTextFromContainer(container, &tb);
-
+    // Position: bottom-left inside container (clean + consistent)
     CGFloat size = 24.0;
     CGFloat pad = 6.0;
-
-    CGRect frame;
-    if (!CGRectIsEmpty(tb)) {
-        CGFloat x = MAX(pad, MIN(tb.origin.x, container.bounds.size.width - size - pad));
-        CGFloat y = MIN(container.bounds.size.height - size - pad, CGRectGetMaxY(tb) + pad);
-        frame = CGRectMake(x, y, size, size);
-    } else {
-        frame = CGRectMake(pad, MAX(pad, container.bounds.size.height - size - pad), size, size);
-    }
-
-    btn.frame = frame;
+    btn.frame = CGRectMake(pad, MAX(pad, container.bounds.size.height - size - pad), size, size);
     [container bringSubviewToFront:btn];
 }
 
-// ---- Hooks: place button on each cell ----
+// ---- Hooks ----
 %hook UITableViewCell
 - (void)layoutSubviews {
     %orig;
@@ -424,5 +431,5 @@ static void QTEnsureInlineButtonForContainer(UIView *container) {
 %end
 
 %ctor {
-    // No floating button; per-cell only.
+    if (!QTIsTargetApp()) return;
 }
