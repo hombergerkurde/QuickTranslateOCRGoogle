@@ -374,7 +374,7 @@ static void QTEnsureInlineButtonForContainer(UIView *container) {
         btn.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.70];
         btn.layer.cornerRadius = 12.0;
         btn.clipsToBounds = YES;
-        btn.contentEdgeInsets = UIEdgeInsetsMake(4, 4, 4, 4);
+        
         btn.exclusiveTouch = YES;
 
         UIImage *img = QTButtonImage();
