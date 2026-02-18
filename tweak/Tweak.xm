@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <Vision/Vision.h>
+#import <QuartzCore/QuartzCore.h>
 
 static NSString * const kPrefsDomain = @"com.hombergerkurde.quicktranslate";
 static const NSInteger kQTButtonTag = 987654;
@@ -23,7 +24,7 @@ static BOOL QTGetBool(NSString *key, BOOL def) {
     return v ? [v boolValue] : def;
 }
 
-#pragma mark - Window
+#pragma mark - Window / Top VC
 
 static UIWindow *QTGetKeyWindow(void) {
     UIApplication *app = UIApplication.sharedApplication;
@@ -34,6 +35,7 @@ static UIWindow *QTGetKeyWindow(void) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
 
             UIWindowScene *ws = (UIWindowScene *)scene;
+
             for (UIWindow *w in ws.windows) {
                 if (w.isKeyWindow) return w;
             }
@@ -45,6 +47,7 @@ static UIWindow *QTGetKeyWindow(void) {
             UIWindowScene *ws = (UIWindowScene *)scene;
             if (ws.windows.count > 0) return ws.windows.firstObject;
         }
+
         return nil;
     }
 
@@ -186,9 +189,9 @@ static UIImage *QTNormalizeForOCR(UIImage *src) {
     return out;
 }
 
-#pragma mark - OCR (Vision)
+#pragma mark - OCR (Vision) with boxes
 
-static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError *err)) {
+static void QTRunOCR_Boxes(UIImage *image, void (^completion)(NSArray<VNRecognizedTextObservation *> *obs, NSError *err)) {
     UIImage *norm = QTNormalizeForOCR(image);
     if (!norm || !norm.CGImage) {
         if (completion) completion(nil, [NSError errorWithDomain:@"QT" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Kein Bild für OCR"}]);
@@ -197,14 +200,8 @@ static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError 
 
     VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *request, NSError *error) {
         if (error) { if (completion) completion(nil, error); return; }
-
-        NSMutableArray<NSString *> *lines = [NSMutableArray new];
-        for (VNRecognizedTextObservation *obs in request.results) {
-            VNRecognizedText *best = [[obs topCandidates:1] firstObject];
-            if (best.string.length > 0) [lines addObject:best.string];
-        }
-        NSString *joined = [lines componentsJoinedByString:@"\n"];
-        if (completion) completion(joined, nil);
+        NSArray *results = request.results ?: @[];
+        if (completion) completion((NSArray<VNRecognizedTextObservation *> *)results, nil);
     }];
 
     req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
@@ -218,7 +215,67 @@ static void QTRunOCR(UIImage *image, void (^completion)(NSString *text, NSError 
     });
 }
 
-#pragma mark - LibreTranslate (no paid api required)
+static CGRect QTVisionRectToImageRect(CGRect bb, CGSize imgSize) {
+    CGFloat W = imgSize.width;
+    CGFloat H = imgSize.height;
+    return CGRectMake(bb.origin.x * W,
+                      (1.0 - bb.origin.y - bb.size.height) * H,
+                      bb.size.width * W,
+                      bb.size.height * H);
+}
+
+static NSString *QTTextFromObs(VNRecognizedTextObservation *o) {
+    VNRecognizedText *best = [[o topCandidates:1] firstObject];
+    return best.string ?: @"";
+}
+
+static NSString *QTExtractTextNearPoint(NSArray<VNRecognizedTextObservation *> *obs,
+                                       CGPoint tapPoint,
+                                       CGSize imgSize) {
+    if (obs.count == 0) return @"";
+
+    NSMutableArray<VNRecognizedTextObservation *> *hit = [NSMutableArray new];
+
+    for (VNRecognizedTextObservation *o in obs) {
+        CGRect r = QTVisionRectToImageRect(o.boundingBox, imgSize);
+        if (CGRectContainsPoint(r, tapPoint)) {
+            [hit addObject:o];
+        }
+    }
+
+    if (hit.count == 0) {
+        VNRecognizedTextObservation *best = nil;
+        CGFloat bestDist = CGFLOAT_MAX;
+
+        for (VNRecognizedTextObservation *o in obs) {
+            CGRect r = QTVisionRectToImageRect(o.boundingBox, imgSize);
+            CGPoint c = CGPointMake(CGRectGetMidX(r), CGRectGetMidY(r));
+            CGFloat dx = c.x - tapPoint.x;
+            CGFloat dy = c.y - tapPoint.y;
+            CGFloat d = dx*dx + dy*dy;
+            if (d < bestDist) { bestDist = d; best = o; }
+        }
+        if (best) [hit addObject:best];
+    }
+
+    [hit sortUsingComparator:^NSComparisonResult(VNRecognizedTextObservation *a, VNRecognizedTextObservation *b) {
+        CGRect ra = QTVisionRectToImageRect(a.boundingBox, imgSize);
+        CGRect rb = QTVisionRectToImageRect(b.boundingBox, imgSize);
+        if (fabs(CGRectGetMinY(ra) - CGRectGetMinY(rb)) > 6.0) {
+            return CGRectGetMinY(ra) < CGRectGetMinY(rb) ? NSOrderedAscending : NSOrderedDescending;
+        }
+        return CGRectGetMinX(ra) < CGRectGetMinX(rb) ? NSOrderedAscending : NSOrderedDescending;
+    }];
+
+    NSMutableArray<NSString *> *lines = [NSMutableArray new];
+    for (VNRecognizedTextObservation *o in hit) {
+        NSString *s = [QTTextFromObs(o) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (s.length) [lines addObject:s];
+    }
+    return [lines componentsJoinedByString:@"\n"];
+}
+
+#pragma mark - LibreTranslate
 
 static NSURLSession *QTSession(void) {
     NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
@@ -280,70 +337,137 @@ static void QTTranslate_Libre(NSString *serverURL, NSString *apiKey, NSString *t
     [task resume];
 }
 
-#pragma mark - Main action
+#pragma mark - Pick Mode Overlay
 
-static BOOL gQTBusy = NO;
+@interface QTOverlayView : UIView
+@property (nonatomic, copy) void (^onPick)(CGPoint p);
+@end
 
-static void QTTranslateVisibleScreen(void) {
-    if (gQTBusy) return;
-    if (!QTGetBool(@"enabled", YES)) return;
-    gQTBusy = YES;
+@implementation QTOverlayView
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.15];
+        self.userInteractionEnabled = YES;
 
-    NSString *target = QTGetString(@"targetLang", @"de");
-    target = [target stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (target.length == 0) target = @"de";
+        UILabel *hint = [[UILabel alloc] initWithFrame:CGRectZero];
+        hint.text = @"Tippe auf den Text, den du übersetzen willst";
+        hint.textColor = UIColor.whiteColor;
+        hint.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.75];
+        hint.textAlignment = NSTextAlignmentCenter;
+        hint.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        hint.layer.cornerRadius = 12;
+        hint.clipsToBounds = YES;
+        hint.tag = 101;
 
-    dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Erkenne Text…"); });
-
-    UIImage *snap = QTScreenSnapshot();
-    if (!snap) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            QTHideHUD();
-            QTShowAlert(@"QuickTranslate", @"Screenshot fehlgeschlagen.");
-        });
-        gQTBusy = NO;
-        return;
+        [self addSubview:hint];
     }
-
-    QTRunOCR(snap, ^(NSString *text, NSError *err) {
-        if (err) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                QTHideHUD();
-                QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler");
-            });
-            gQTBusy = NO;
-            return;
-        }
-
-        NSString *trim = [(text ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (trim.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                QTHideHUD();
-                QTShowAlert(@"QuickTranslate", @"Kein Text erkannt.");
-            });
-            gQTBusy = NO;
-            return;
-        }
-
-        if (trim.length > 1400) trim = [trim substringToIndex:1400];
-
-        dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Übersetze…"); });
-
-        NSString *server = QTGetString(@"ltServer", @"https://translate.cutie.dating");
-        NSString *apiKey  = QTGetString(@"ltApiKey", @"");
-
-        QTTranslate_Libre(server, apiKey, trim, target, ^(NSString *translated, NSError *tErr) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                QTHideHUD();
-                if (tErr) QTShowAlert(@"Übersetzung fehlgeschlagen", tErr.localizedDescription ?: @"Unbekannter Fehler");
-                else QTShowResultPopup(translated);
-            });
-            gQTBusy = NO;
-        });
-    });
+    return self;
 }
 
-#pragma mark - Floating button (for now)
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    UILabel *hint = [self viewWithTag:101];
+    CGFloat w = MIN(self.bounds.size.width - 40.0, 360.0);
+    hint.frame = CGRectMake((self.bounds.size.width - w)/2.0,
+                            self.safeAreaInsets.top + 18.0,
+                            w, 44.0);
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *t = touches.anyObject;
+    CGPoint p = [t locationInView:self];
+    if (self.onPick) self.onPick(p);
+}
+@end
+
+#pragma mark - Main Action (pick + translate)
+
+static BOOL gQTBusy = NO;
+static BOOL gQTPicking = NO;
+
+static void QTStartPickMode(void) {
+    if (gQTBusy || gQTPicking) return;
+    if (!QTGetBool(@"enabled", YES)) return;
+
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return;
+
+    gQTPicking = YES;
+    QTShowHUD(@"Tippe auf den Text…");
+
+    QTOverlayView *ov = [[QTOverlayView alloc] initWithFrame:w.bounds];
+    ov.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+    __weak QTOverlayView *weakOv = ov;
+    ov.onPick = ^(CGPoint p) {
+        QTOverlayView *strongOv = weakOv;
+        [strongOv removeFromSuperview];
+        QTHideHUD();
+
+        gQTBusy = YES;
+        dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Erkenne Text…"); });
+
+        UIImage *snap = QTScreenSnapshot();
+        if (!snap) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                QTHideHUD();
+                QTShowAlert(@"QuickTranslate", @"Screenshot fehlgeschlagen.");
+            });
+            gQTBusy = NO;
+            gQTPicking = NO;
+            return;
+        }
+
+        QTRunOCR_Boxes(snap, ^(NSArray<VNRecognizedTextObservation *> *obs, NSError *err) {
+            if (err) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    QTHideHUD();
+                    QTShowAlert(@"OCR Fehler", err.localizedDescription ?: @"Unbekannter Fehler");
+                });
+                gQTBusy = NO;
+                gQTPicking = NO;
+                return;
+            }
+
+            NSString *pickedText = QTExtractTextNearPoint(obs, p, snap.size);
+            NSString *trim = [pickedText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (trim.length == 0) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    QTHideHUD();
+                    QTShowAlert(@"QuickTranslate", @"Kein Text an der Stelle gefunden. Tippe näher an den Text.");
+                });
+                gQTBusy = NO;
+                gQTPicking = NO;
+                return;
+            }
+
+            if (trim.length > 1400) trim = [trim substringToIndex:1400];
+            dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Übersetze…"); });
+
+            NSString *target = QTGetString(@"targetLang", @"de");
+            target = [target stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (target.length == 0) target = @"de";
+
+            NSString *server = QTGetString(@"ltServer", @"https://translate.cutie.dating");
+            NSString *apiKey  = QTGetString(@"ltApiKey", @"");
+
+            QTTranslate_Libre(server, apiKey, trim, target, ^(NSString *translated, NSError *tErr) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    QTHideHUD();
+                    if (tErr) QTShowAlert(@"Übersetzung fehlgeschlagen", tErr.localizedDescription ?: @"Unbekannter Fehler");
+                    else QTShowResultPopup(translated);
+                });
+                gQTBusy = NO;
+                gQTPicking = NO;
+            });
+        });
+    };
+
+    [w addSubview:ov];
+    [w bringSubviewToFront:ov];
+}
+
+#pragma mark - Floating button
 
 static void QTInstallFloatingButton(void) {
     UIWindow *w = QTGetKeyWindow();
@@ -367,7 +491,6 @@ static void QTInstallFloatingButton(void) {
         btn.clipsToBounds = YES;
         btn.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.92];
 
-        // drag
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:btn action:@selector(qt_pan:)];
         [btn addGestureRecognizer:pan];
 
@@ -393,7 +516,7 @@ static void QTInstallFloatingButton(void) {
     [gr setTranslation:CGPointZero inView:v.superview];
 }
 - (void)qt_tap {
-    QTTranslateVisibleScreen();
+    QTStartPickMode();
 }
 @end
 
