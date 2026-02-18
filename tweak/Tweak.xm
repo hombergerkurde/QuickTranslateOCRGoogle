@@ -1,47 +1,36 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import <NaturalLanguage/NaturalLanguage.h>
+#import <WebKit/WebKit.h>
 
 static NSString * const kPrefsDomain = @"com.hombergerkurde.quicktranslate";
 
-// ---- Target apps ----
-static BOOL QTIsTargetApp(void) {
-    static dispatch_once_t onceToken;
-    static NSSet<NSString *> *targets;
-    dispatch_once(&onceToken, ^{
-        targets = [NSSet setWithArray:@[
-            @"ph.telegra.Telegraph",            // Telegram
-            @"com.atebits.Tweetie2",            // X/Twitter
-            @"net.whatsapp.WhatsApp",           // WhatsApp
-            @"com.hammerandchisel.discord",     // Discord
-            @"com.facebook.Facebook",           // Facebook
-            @"com.burbn.instagram",             // Instagram
-            @"org.coolstar.SileoStore"          // Sileo
-        ]];
-    });
+#pragma mark - Prefs
 
-    NSString *bid = NSBundle.mainBundle.bundleIdentifier ?: @"";
-    return [targets containsObject:bid];
-}
-
-// ---- Prefs ----
 static NSDictionary *QTGetPrefs(void) {
     NSDictionary *d = [[NSUserDefaults standardUserDefaults] persistentDomainForName:kPrefsDomain];
     return [d isKindOfClass:[NSDictionary class]] ? d : @{};
 }
-
 static BOOL QTGetBool(NSString *key, BOOL def) {
     id v = QTGetPrefs()[key];
     return v ? [v boolValue] : def;
 }
-
 static NSString *QTGetString(NSString *key, NSString *def) {
     id v = QTGetPrefs()[key];
     return [v isKindOfClass:[NSString class]] ? (NSString *)v : def;
 }
 
-// ---- Window / VC ----
+#pragma mark - Bundle helpers
+
+static NSString *QTBundleID(void) {
+    return NSBundle.mainBundle.bundleIdentifier ?: @"";
+}
+static BOOL QTIsTelegram(void) { return [QTBundleID() isEqualToString:@"ph.telegra.Telegraph"]; }
+static BOOL QTIsX(void)        { return [QTBundleID() isEqualToString:@"com.atebits.Tweetie2"]; }
+static BOOL QTIsSileo(void)    { return [QTBundleID() isEqualToString:@"org.coolstar.SileoStore"]; }
+
+#pragma mark - Window / VC
+
 static UIWindow *QTGetKeyWindow(void) {
     UIApplication *app = UIApplication.sharedApplication;
 
@@ -56,13 +45,11 @@ static UIWindow *QTGetKeyWindow(void) {
             }
             if (ws.windows.count > 0) return ws.windows.firstObject;
         }
-
         for (UIScene *scene in app.connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
             UIWindowScene *ws = (UIWindowScene *)scene;
             if (ws.windows.count > 0) return ws.windows.firstObject;
         }
-
         return nil;
     }
 
@@ -84,7 +71,8 @@ static UIViewController *QTTopViewController(UIViewController *vc) {
     return vc;
 }
 
-// ---- HUD / Alerts ----
+#pragma mark - HUD / UI
+
 static const NSInteger kQTHUDTag = 998877;
 
 static void QTHideHUD(void) {
@@ -122,8 +110,7 @@ static void QTShowHUD(NSString *text) {
 
     lbl.frame = CGRectMake((w.bounds.size.width - width)/2.0,
                            w.safeAreaInsets.top + 18.0,
-                           width,
-                           height);
+                           width, height);
 
     [w addSubview:lbl];
 }
@@ -161,7 +148,8 @@ static void QTShowResultPopup(NSString *translated) {
     [top presentViewController:ac animated:YES completion:nil];
 }
 
-// ---- Translation (LibreTranslate) ----
+#pragma mark - LibreTranslate
+
 static NSURLSession *QTSession(void) {
     NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
     cfg.timeoutIntervalForRequest = 35.0;
@@ -230,16 +218,17 @@ static void QTTranslateText(NSString *text) {
         QTShowAlert(@"QuickTranslate", @"Kein Text gefunden.");
         return;
     }
-    if (trim.length > 1400) trim = [trim substringToIndex:1400];
+    if (trim.length > 2000) trim = [trim substringToIndex:2000];
 
     NSString *target = QTGetString(@"targetLang", @"de");
     target = [target stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (target.length == 0) target = @"de";
 
     NSString *server = QTGetString(@"ltServer", @"https://translate.cutie.dating");
-    NSString *apiKey = QTGetString(@"ltApiKey", @"");
+    NSString *apiKey  = QTGetString(@"ltApiKey", @"");
 
-    QTShowHUD(@"Übersetze…");
+    dispatch_async(dispatch_get_main_queue(), ^{ QTShowHUD(@"Übersetze…"); });
+
     QTTranslate_Libre(server, apiKey, trim, target, ^(NSString *translated, NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
             QTHideHUD();
@@ -249,187 +238,344 @@ static void QTTranslateText(NSString *text) {
     });
 }
 
-// ---- Language filter (NaturalLanguage) ----
-static BOOL QTShouldShowForText(NSString *text) {
-    // allow override from prefs
-    BOOL always = QTGetBool(@"alwaysShowButton", NO);
-    if (always) return YES;
+#pragma mark - Selected text (Context Menu like Translomatic)
 
-    NSString *trim = [text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (trim.length < 3) return NO;
+static NSString *QTGrabSelectedTextByCopy(void) {
+    UIPasteboard *pb = UIPasteboard.generalPasteboard;
 
-    NSString *target = QTGetString(@"targetLang", @"de");
-    target = [[target lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (target.length == 0) target = @"de";
+    // Backup clipboard
+    NSArray *oldItems = pb.items;
 
-    // detect language
-    NLLanguageRecognizer *rec = [NLLanguageRecognizer new];
-    [rec processString:trim];
-    NLLanguage lang = rec.dominantLanguage;
-    if (!lang) return YES; // if uncertain, show
-
-    NSString *det = [lang lowercaseString];
-    // If detected == target -> hide (looks already in target language)
-    if (det.length && [det hasPrefix:target]) {
-        return NO;
+    BOOL did = [UIApplication.sharedApplication sendAction:@selector(copy:) to:nil from:nil forEvent:nil];
+    if (!did) {
+        pb.items = oldItems;
+        return nil;
     }
-    return YES;
+
+    NSString *copied = pb.string;
+
+    // Restore clipboard
+    pb.items = oldItems;
+
+    NSString *trim = [copied ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return trim.length ? trim : nil;
 }
 
-// ---- Text extraction from a cell ----
-static BOOL QTLooksLikeRealText(NSString *s) {
+static SEL kQTActionSEL;
+
+@interface UIResponder (QTMenu)
+- (void)qt_quickTranslate:(id)sender;
+@end
+
+@implementation UIResponder (QTMenu)
+- (void)qt_quickTranslate:(id)sender {
+    (void)sender;
+    if (!QTGetBool(@"enabled", YES)) return;
+
+    NSString *selText = QTGrabSelectedTextByCopy();
+    if (!selText) {
+        QTShowAlert(@"QuickTranslate", @"Bitte Text markieren und dann QuickTranslate auswählen.");
+        return;
+    }
+    QTTranslateText(selText);
+}
+@end
+
+%hook UIResponder
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
+    BOOL orig = %orig;
+    if (action == kQTActionSEL) {
+        if (!QTGetBool(@"enabled", YES)) return NO;
+        BOOL canCopy = %orig(@selector(copy:), sender);
+        return canCopy;
+    }
+    return orig;
+}
+%end
+
+static void QTInstallMenuItem(void) {
+    kQTActionSEL = @selector(qt_quickTranslate:);
+    UIMenuItem *item = [[UIMenuItem alloc] initWithTitle:@"QuickTranslate" action:kQTActionSEL];
+
+    UIMenuController *mc = UIMenuController.sharedMenuController;
+    NSArray *items = mc.menuItems ?: @[];
+
+    for (UIMenuItem *it in items) {
+        if (it.action == kQTActionSEL) return;
+    }
+    mc.menuItems = [items arrayByAddingObject:item];
+}
+
+#pragma mark - Helpers: extract visible text from a cell/view (Telegram/X long-press)
+
+static BOOL QTLooksLikeText(NSString *s) {
     if (![s isKindOfClass:[NSString class]]) return NO;
     NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (t.length < 2) return NO;
-    if ([t.lowercaseString isEqualToString:@"ok"]) return NO;
-
-    // require at least one letter
     if ([t rangeOfCharacterFromSet:[NSCharacterSet letterCharacterSet]].location == NSNotFound) return NO;
     return YES;
 }
 
-static void QTCollectText(UIView *v, NSMutableArray<NSString *> *out, NSInteger depth) {
+static void QTCollectTextFromView(UIView *v, NSMutableArray<NSString *> *out, NSInteger depth) {
     if (!v || depth > 14) return;
     if (!v.window || v.hidden || v.alpha < 0.01) return;
 
     NSString *text = nil;
-    if ([v isKindOfClass:[UILabel class]]) {
-        text = ((UILabel *)v).text;
-    } else if ([v isKindOfClass:[UITextView class]]) {
-        text = ((UITextView *)v).text;
-    } else if ([v isKindOfClass:[UITextField class]]) {
-        text = ((UITextField *)v).text;
-    }
+    if ([v isKindOfClass:[UILabel class]]) text = ((UILabel *)v).text;
+    else if ([v isKindOfClass:[UITextView class]]) text = ((UITextView *)v).text;
+    else if ([v isKindOfClass:[UITextField class]]) text = ((UITextField *)v).text;
 
-    if (QTLooksLikeRealText(text)) {
+    if (QTLooksLikeText(text)) {
         NSString *t = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (t.length) [out addObject:t];
     }
 
-    for (UIView *sv in v.subviews) {
-        QTCollectText(sv, out, depth + 1);
-    }
+    for (UIView *sv in v.subviews) QTCollectTextFromView(sv, out, depth + 1);
 }
 
 static NSString *QTExtractTextFromContainer(UIView *container) {
     NSMutableArray<NSString *> *chunks = [NSMutableArray new];
-    QTCollectText(container, chunks, 0);
+    QTCollectTextFromView(container, chunks, 0);
 
     NSMutableOrderedSet<NSString *> *uniq = [NSMutableOrderedSet orderedSet];
-    for (NSString *s in chunks) {
-        if (s.length) [uniq addObject:s];
-    }
+    for (NSString *s in chunks) if (s.length) [uniq addObject:s];
 
     NSString *joined = [[uniq array] componentsJoinedByString:@"\n"];
-    return [joined stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    joined = [joined stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (joined.length > 2000) joined = [joined substringToIndex:2000];
+    return joined;
 }
 
-// ---- Inline button ----
-static char kQTInlineBtnKey;
+#pragma mark - Telegram/X: show ONE button near long-pressed message/post
 
-@interface QTInlineButton : UIButton
+static const NSInteger kQTFlyBtnTag = 445566;
+
+static void QTRemoveFlyButton(void) {
+    UIWindow *w = QTGetKeyWindow();
+    if (!w) return;
+    UIView *b = [w viewWithTag:kQTFlyBtnTag];
+    if (b) [b removeFromSuperview];
+}
+
+@interface QTFlyButton : UIButton
+@property (nonatomic, copy) NSString *qt_text;
 @end
-@implementation QTInlineButton
+@implementation QTFlyButton
 @end
 
-static UIImage *QTButtonImage(void) {
+static void QTFlyTapped(QTFlyButton *btn) {
+    NSString *t = btn.qt_text ?: @"";
+    QTRemoveFlyButton();
+    QTTranslateText(t);
+}
+
+static void QTShowFlyButtonForView(UIView *anchor, NSString *text) {
+    UIWindow *w = QTGetKeyWindow();
+    if (!w || !anchor) return;
+
+    QTRemoveFlyButton();
+
+    CGRect r = [anchor convertRect:anchor.bounds toView:w];
+    if (CGRectIsEmpty(r)) return;
+
+    QTFlyButton *btn = [QTFlyButton buttonWithType:UIButtonTypeSystem];
+    btn.tag = kQTFlyBtnTag;
+    btn.qt_text = text ?: @"";
+    btn.tintColor = UIColor.systemBlueColor;
+    btn.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.90];
+    btn.layer.cornerRadius = 14.0;
+    btn.clipsToBounds = YES;
+    btn.exclusiveTouch = YES;
+
     if (@available(iOS 13.0, *)) {
         UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightSemibold];
         UIImage *img = [UIImage systemImageNamed:@"globe" withConfiguration:cfg];
-        if (img) return img;
-    }
-    return nil;
-}
-
-static UIView *QTFindHostCell(UIView *v) {
-    UIView *cur = v;
-    while (cur) {
-        if ([cur isKindOfClass:[UITableViewCell class]] || [cur isKindOfClass:[UICollectionViewCell class]]) return cur;
-        cur = cur.superview;
-    }
-    return nil;
-}
-
-static void QTInlineButtonTapped(QTInlineButton *btn) {
-    UIView *cell = QTFindHostCell(btn);
-    if (!cell) return;
-
-    UIView *container = nil;
-    if ([cell isKindOfClass:[UITableViewCell class]]) {
-        container = ((UITableViewCell *)cell).contentView;
-    } else if ([cell isKindOfClass:[UICollectionViewCell class]]) {
-        container = ((UICollectionViewCell *)cell).contentView;
-    }
-    if (!container) return;
-
-    NSString *text = QTExtractTextFromContainer(container);
-    QTTranslateText(text);
-}
-
-@interface UIButton (QTInline)
-- (void)qt_inlineTap;
-@end
-@implementation UIButton (QTInline)
-- (void)qt_inlineTap {
-    QTInlineButtonTapped((QTInlineButton *)self);
-}
-@end
-
-static void QTEnsureInlineButtonForContainer(UIView *container) {
-    if (!container) return;
-    if (!QTIsTargetApp()) return;
-    if (!QTGetBool(@"enabled", YES)) return;
-
-    NSString *txt = QTExtractTextFromContainer(container);
-    if (!QTShouldShowForText(txt)) {
-        QTInlineButton *existing = objc_getAssociatedObject(container, &kQTInlineBtnKey);
-        if (existing) [existing removeFromSuperview];
-        objc_setAssociatedObject(container, &kQTInlineBtnKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        return;
-    }
-
-    QTInlineButton *btn = objc_getAssociatedObject(container, &kQTInlineBtnKey);
-    if (!btn) {
-        btn = [QTInlineButton buttonWithType:UIButtonTypeSystem];
-        btn.tintColor = UIColor.systemBlueColor;
-        btn.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.70];
-        btn.layer.cornerRadius = 12.0;
-        btn.clipsToBounds = YES;
-        btn.exclusiveTouch = YES;
-
-        UIImage *img = QTButtonImage();
         if (img) [btn setImage:img forState:UIControlStateNormal];
         else [btn setTitle:@"🌐" forState:UIControlStateNormal];
-
-        [btn addTarget:btn action:@selector(qt_inlineTap) forControlEvents:UIControlEventTouchUpInside];
-        objc_setAssociatedObject(container, &kQTInlineBtnKey, btn, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [container addSubview:btn];
+    } else {
+        [btn setTitle:@"🌐" forState:UIControlStateNormal];
     }
 
-    // Position: bottom-left inside container (clean + consistent)
-    CGFloat size = 24.0;
-    CGFloat pad = 6.0;
-    btn.frame = CGRectMake(pad, MAX(pad, container.bounds.size.height - size - pad), size, size);
-    [container bringSubviewToFront:btn];
+    [btn addTarget:btn action:@selector(qt_flyTap) forControlEvents:UIControlEventTouchUpInside];
+
+    // position: bottom-left under the bubble/post area (like Translomatic vibe)
+    CGFloat size = 28.0;
+    CGFloat x = MAX(10.0, MIN(CGRectGetMinX(r), w.bounds.size.width - size - 10.0));
+    CGFloat y = MIN(w.bounds.size.height - size - 10.0, CGRectGetMaxY(r) + 6.0);
+    btn.frame = CGRectMake(x, y, size, size);
+
+    [w addSubview:btn];
+    [w bringSubviewToFront:btn];
 }
 
-// ---- Hooks ----
+@interface UIButton (QTFly)
+- (void)qt_flyTap;
+@end
+@implementation UIButton (QTFly)
+- (void)qt_flyTap { QTFlyTapped((QTFlyButton *)self); }
+@end
+
+static char kQTLongPressKey;
+
+static void QTAttachLongPressIfNeeded(UIView *v) {
+    if (!v) return;
+    if (!(QTIsTelegram() || QTIsX())) return;
+    if (!QTGetBool(@"enabled", YES)) return;
+
+    if (objc_getAssociatedObject(v, &kQTLongPressKey)) return;
+
+    UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:v action:@selector(qt_lp:)];
+    lp.minimumPressDuration = 0.35;
+    lp.cancelsTouchesInView = NO;
+    [v addGestureRecognizer:lp];
+
+    objc_setAssociatedObject(v, &kQTLongPressKey, lp, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+@interface UIView (QTLP)
+- (void)qt_lp:(UILongPressGestureRecognizer *)gr;
+@end
+
+@implementation UIView (QTLP)
+- (void)qt_lp:(UILongPressGestureRecognizer *)gr {
+    if (gr.state != UIGestureRecognizerStateBegan) return;
+
+    // find a cell-ish container up the chain
+    UIView *cur = self;
+    UIView *cell = nil;
+    while (cur) {
+        if ([cur isKindOfClass:[UITableViewCell class]] || [cur isKindOfClass:[UICollectionViewCell class]]) { cell = cur; break; }
+        cur = cur.superview;
+    }
+    if (!cell) return;
+
+    UIView *content = nil;
+    if ([cell isKindOfClass:[UITableViewCell class]]) content = ((UITableViewCell *)cell).contentView;
+    else if ([cell isKindOfClass:[UICollectionViewCell class]]) content = ((UICollectionViewCell *)cell).contentView;
+    if (!content) return;
+
+    NSString *t = QTExtractTextFromContainer(content);
+    if (t.length == 0) return;
+
+    QTShowFlyButtonForView(content, t);
+}
+@end
+
 %hook UITableViewCell
 - (void)layoutSubviews {
     %orig;
-    if (!QTIsTargetApp()) return;
-    QTEnsureInlineButtonForContainer(self.contentView);
+    if (QTIsTelegram() || QTIsX()) {
+        QTAttachLongPressIfNeeded(self.contentView);
+    }
 }
 %end
 
 %hook UICollectionViewCell
 - (void)layoutSubviews {
     %orig;
-    if (!QTIsTargetApp()) return;
-    QTEnsureInlineButtonForContainer(self.contentView);
+    if (QTIsTelegram() || QTIsX()) {
+        QTAttachLongPressIfNeeded(self.contentView);
+    }
 }
 %end
 
+#pragma mark - Sileo: navbar button to translate depictions (WKWebView innerText)
+
+static WKWebView *QTFindWKWebView(UIView *root) {
+    if (!root) return nil;
+    if ([root isKindOfClass:[WKWebView class]]) return (WKWebView *)root;
+    for (UIView *v in root.subviews) {
+        WKWebView *w = QTFindWKWebView(v);
+        if (w) return w;
+    }
+    return nil;
+}
+
+static void QTSileoTranslateVisibleDepiction(UIViewController *vc) {
+    if (!vc) return;
+
+    WKWebView *wv = QTFindWKWebView(vc.view);
+    if (!wv) {
+        QTShowAlert(@"QuickTranslate", @"Keine Depiction-WebView gefunden.");
+        return;
+    }
+
+    QTShowHUD(@"Lese Depiction…");
+    [wv evaluateJavaScript:@"document.body && document.body.innerText ? document.body.innerText : ''" completionHandler:^(id result, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            QTHideHUD();
+            if (error) {
+                QTShowAlert(@"QuickTranslate", @"Konnte Depiction-Text nicht lesen.");
+                return;
+            }
+            NSString *text = [result isKindOfClass:[NSString class]] ? (NSString *)result : @"";
+            text = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (text.length == 0) {
+                QTShowAlert(@"QuickTranslate", @"Kein Text gefunden.");
+                return;
+            }
+            QTTranslateText(text);
+        });
+    }];
+}
+
+static void QTInstallSileoNavButton(UIViewController *vc) {
+    if (!QTIsSileo()) return;
+    if (!QTGetBool(@"enabled", YES)) return;
+    if (!vc || !vc.navigationItem) return;
+
+    // only install when a WKWebView is on screen (depiction/pages)
+    WKWebView *wv = QTFindWKWebView(vc.view);
+    if (!wv) return;
+
+    // avoid duplicates
+    UIBarButtonItem *existing = nil;
+    for (UIBarButtonItem *it in vc.navigationItem.rightBarButtonItems ?: @[]) {
+        if ([it.accessibilityIdentifier isEqualToString:@"qt_nav"]) { existing = it; break; }
+    }
+    if (existing) return;
+
+    UIBarButtonItem *btn = nil;
+    if (@available(iOS 13.0, *)) {
+        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightSemibold];
+        UIImage *img = [UIImage systemImageNamed:@"globe" withConfiguration:cfg];
+        btn = [[UIBarButtonItem alloc] initWithImage:img style:UIBarButtonItemStylePlain target:vc action:@selector(qt_sileoTap)];
+    } else {
+        btn = [[UIBarButtonItem alloc] initWithTitle:@"🌐" style:UIBarButtonItemStylePlain target:vc action:@selector(qt_sileoTap)];
+    }
+
+    btn.accessibilityIdentifier = @"qt_nav";
+
+    NSMutableArray *items = [NSMutableArray arrayWithArray:(vc.navigationItem.rightBarButtonItems ?: @[])];
+    [items addObject:btn];
+    vc.navigationItem.rightBarButtonItems = items;
+}
+
+@interface UIViewController (QTSileo)
+- (void)qt_sileoTap;
+@end
+
+@implementation UIViewController (QTSileo)
+- (void)qt_sileoTap {
+    QTSileoTranslateVisibleDepiction(self);
+}
+@end
+
+%hook UIViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (QTIsSileo()) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            QTInstallSileoNavButton(self);
+        });
+    }
+}
+%end
+
+#pragma mark - ctor
+
 %ctor {
-    if (!QTIsTargetApp()) return;
+    @autoreleasepool {
+        QTInstallMenuItem();
+    }
 }
