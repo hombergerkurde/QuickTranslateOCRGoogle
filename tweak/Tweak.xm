@@ -1,4 +1,3 @@
-\
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
@@ -9,19 +8,27 @@ static inline NSDictionary *QTGetPrefs(void) {
     NSDictionary *d = [[NSUserDefaults standardUserDefaults] persistentDomainForName:kQTPrefsDomain];
     return [d isKindOfClass:[NSDictionary class]] ? d : @{};
 }
+
+// Accept old/new keys (enabled + Enabled)
 static inline BOOL QTEnabled(void) {
-    id v = QTGetPrefs()[@"enabled"];
+    NSDictionary *p = QTGetPrefs();
+    id v = p[@"enabled"];
+    if (!v) v = p[@"Enabled"];
     return v ? [v boolValue] : YES;
 }
+
+// Accept old/new keys (targetLang + TargetLang)
 static inline NSString *QTTargetLang(void) {
-    id v = QTGetPrefs()[@"targetLang"];
-    if ([v isKindOfClass:[NSString class]] && [((NSString*)v) length] > 0) return (NSString*)v;
+    NSDictionary *p = QTGetPrefs();
+    id v = p[@"targetLang"];
+    if (!v) v = p[@"TargetLang"];
+    if ([v isKindOfClass:[NSString class]] && ((NSString *)v).length > 0) return (NSString *)v;
     return @"de";
 }
 
 static inline BOOL QTIsX(void) {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier ?: @"";
-    return [bid isEqualToString:@"com.atebits.Tweetie2"];
+    return [bid isEqualToString:@"com.atebits.Tweetie2"]; // X
 }
 
 static UIWindow *QTGetKeyWindow(void) {
@@ -58,18 +65,44 @@ static UIViewController *QTTopVC(UIViewController *vc) {
 }
 
 static void QTAlert(NSString *title, NSString *msg) {
-    UIWindow *w = QTGetKeyWindow();
-    if (!w) return;
-    UIViewController *top = QTTopVC(w.rootViewController);
-    if (!top) return;
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:(title ?: @"")
-                                                                message:(msg ?: @"")
-                                                         preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-    [top presentViewController:ac animated:YES completion:nil];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *w = QTGetKeyWindow();
+        if (!w) return;
+        UIViewController *top = QTTopVC(w.rootViewController);
+        if (!top) return;
+
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:(title ?: @"")
+                                                                    message:(msg ?: @"")
+                                                             preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [top presentViewController:ac animated:YES completion:nil];
+    });
 }
 
-#pragma mark - Extract text from a post cell (generic)
+static void QTShowResult(NSString *original, NSString *translated) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *w = QTGetKeyWindow();
+        if (!w) return;
+        UIViewController *top = QTTopVC(w.rootViewController);
+        if (!top) return;
+
+        NSString *msg = translated ?: @"(leer)";
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Übersetzung"
+                                                                    message:msg
+                                                             preferredStyle:UIAlertControllerStyleAlert];
+
+        [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *a) {
+            if (translated.length) UIPasteboard.generalPasteboard.string = translated;
+        }]];
+
+        [ac addAction:[UIAlertAction actionWithTitle:@"Schließen" style:UIAlertActionStyleCancel handler:nil]];
+        [top presentViewController:ac animated:YES completion:nil];
+    });
+}
+
+#pragma mark - Text extraction
 
 static BOOL QTLooksLikeText(NSString *s) {
     if (![s isKindOfClass:[NSString class]]) return NO;
@@ -115,36 +148,75 @@ static NSString *QTBestTextFromContainer(UIView *container) {
     return best;
 }
 
-#pragma mark - Apple "system translate" UI (Share Sheet)
+#pragma mark - REAL translation (MyMemory - free, no API key)
 
-static void QTPresentSystemTranslateUI(NSString *text) {
+static NSString *QTURLEncode(NSString *s) {
+    if (!s) return @"";
+    NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
+    return [s stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
+}
+
+static void QTTranslateMyMemory(NSString *text) {
     NSString *trim = [text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (trim.length == 0) {
         QTAlert(@"QuickTranslate", @"Kein Text gefunden.");
         return;
     }
 
-    UIWindow *w = QTGetKeyWindow();
-    if (!w) return;
-    UIViewController *top = QTTopVC(w.rootViewController);
-    if (!top) return;
+    // langpair: auto|de (MyMemory supports "auto" in many cases; if it fails, we fallback to en|de)
+    NSString *to = QTTargetLang();
+    if (to.length < 2) to = @"de";
 
-    // NOTE:
-    // On iOS 17, Apple’s official Translation.framework is primarily Swift/SwiftUI and (per Apple docs) iOS 17.4+.
-    // This tweak uses the built-in system “Übersetzen/Translate” action inside the share sheet (free, no API key).
-    // The user picks “Übersetzen” there.
-    UIActivityViewController *avc = [[UIActivityViewController alloc] initWithActivityItems:@[trim] applicationActivities:nil];
+    NSString *q = QTURLEncode(trim);
+    NSString *urlStr = [NSString stringWithFormat:
+                        @"https://api.mymemory.translated.net/get?q=%@&langpair=auto|%@",
+                        q, QTURLEncode(to)];
 
-    if (avc.popoverPresentationController) {
-        avc.popoverPresentationController.sourceView = top.view;
-        avc.popoverPresentationController.sourceRect = CGRectMake(top.view.bounds.size.width/2.0, top.view.safeAreaInsets.top + 40.0, 1, 1);
+    NSURL *url = [NSURL URLWithString:urlStr];
+    if (!url) {
+        QTAlert(@"QuickTranslate", @"Ungültige URL.");
+        return;
     }
 
-    [top presentViewController:avc animated:YES completion:nil];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.timeoutInterval = 12.0;
+    [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
 
-    // Small hint for target language (doesn't force it, but helps)
-    NSString *hint = [NSString stringWithFormat:@"Zielsprache: %@", QTTargetLang()];
-    (void)hint;
+    NSURLSessionDataTask *task =
+    [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+
+        if (err || !data) {
+            QTAlert(@"QuickTranslate", @"Übersetzung fehlgeschlagen (Netzwerk).");
+            return;
+        }
+
+        NSHTTPURLResponse *h = (NSHTTPURLResponse *)resp;
+        if ([h isKindOfClass:[NSHTTPURLResponse class]] && (h.statusCode < 200 || h.statusCode >= 300)) {
+            QTAlert(@"QuickTranslate", [NSString stringWithFormat:@"Übersetzung fehlgeschlagen (HTTP %ld).", (long)h.statusCode]);
+            return;
+        }
+
+        NSError *jerr = nil;
+        id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jerr];
+        if (jerr || ![json isKindOfClass:[NSDictionary class]]) {
+            QTAlert(@"QuickTranslate", @"Übersetzung fehlgeschlagen (JSON).");
+            return;
+        }
+
+        NSDictionary *dict = (NSDictionary *)json;
+        NSDictionary *rd = dict[@"responseData"];
+        NSString *translated = nil;
+        if ([rd isKindOfClass:[NSDictionary class]]) translated = rd[@"translatedText"];
+
+        if (![translated isKindOfClass:[NSString class]] || translated.length == 0) {
+            QTAlert(@"QuickTranslate", @"Übersetzung fehlgeschlagen (leer).");
+            return;
+        }
+
+        QTShowResult(trim, translated);
+    }];
+
+    [task resume];
 }
 
 #pragma mark - Inline globe button on X post cells
@@ -194,13 +266,24 @@ static UIView *QTFindHostCell(UIView *v) {
     return nil;
 }
 
+static BOOL QTShouldAttachToContent(UIView *contentView) {
+    if (!contentView || !contentView.window) return NO;
+    if (contentView.hidden || contentView.alpha < 0.01) return NO;
+    if (contentView.bounds.size.height < 80) return NO;
+
+    NSString *t = QTBestTextFromContainer(contentView);
+    return (t.length >= 15);
+}
+
 static void QTInlineTapped(QTInlineButton *btn) {
     if (!QTEnabled()) return;
+
     UIView *cell = QTFindHostCell(btn);
     UIView *content = QTCellContent(cell);
     if (!content) return;
+
     NSString *text = QTBestTextFromContainer(content);
-    QTPresentSystemTranslateUI(text);
+    QTTranslateMyMemory(text);
 }
 
 @interface UIButton (QTInlineTap)
@@ -210,14 +293,6 @@ static void QTInlineTapped(QTInlineButton *btn) {
 - (void)qt_inlineTap { QTInlineTapped((QTInlineButton *)self); }
 @end
 
-static BOOL QTShouldAttachToContent(UIView *contentView) {
-    if (!contentView || !contentView.window) return NO;
-    if (contentView.hidden || contentView.alpha < 0.01) return NO;
-    if (contentView.bounds.size.height < 80) return NO;
-    NSString *t = QTBestTextFromContainer(contentView);
-    return (t.length >= 15);
-}
-
 static void QTEnsureInlineButton(UIView *contentView) {
     if (!QTIsX()) return;
     if (!QTEnabled()) return;
@@ -225,7 +300,10 @@ static void QTEnsureInlineButton(UIView *contentView) {
     QTInlineButton *btn = objc_getAssociatedObject(contentView, &kQTInlineBtnKey);
 
     if (!QTShouldAttachToContent(contentView)) {
-        if (btn) { [btn removeFromSuperview]; objc_setAssociatedObject(contentView, &kQTInlineBtnKey, nil, OBJC_ASSOCIATION_ASSIGN); }
+        if (btn) {
+            [btn removeFromSuperview];
+            objc_setAssociatedObject(contentView, &kQTInlineBtnKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        }
         return;
     }
 
@@ -262,5 +340,5 @@ static void QTEnsureInlineButton(UIView *contentView) {
 %end
 
 %ctor {
-    // Settings/UI provided via PreferenceLoader simple approach.
+    // Settings is handled by PreferenceLoader; tweak reads prefs domain directly.
 }
