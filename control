@@ -1,9 +1,9 @@
 Package: com.hombergerkurde.quicktranslate
 Name: QuickTranslate
+Depends: mobilesubstrate
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Quick translate button (rootless)
-Maintainer: hombergerkurde
-Author: hombergerkurde
+Description: QuickTranslate (X only) - uses iOS system Translate UI
+Maintainer: You
+Author: You
 Section: Tweaks
-Depends: preferenceloader
