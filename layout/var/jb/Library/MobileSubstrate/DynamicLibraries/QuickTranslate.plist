@@ -6,15 +6,7 @@
   <dict>
     <key>Bundles</key>
     <array>
-      <string>com.apple.mobilesafari</string>
-      <string>net.whatsapp.WhatsApp</string>
-      <string>com.burbn.instagram</string>
-      <string>com.facebook.Facebook</string>
-      <string>com.hammerandchisel.discord</string>
-      <string>ph.telegra.Telegraph</string>
-      <string>com.reddit.Reddit</string>
       <string>com.atebits.Tweetie2</string>
-      <string>org.coolstar.SileoStore</string>
     </array>
   </dict>
 </dict>

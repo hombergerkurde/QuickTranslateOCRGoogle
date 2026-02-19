@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>title</key>
+  <string>QuickTranslate</string>
+  <key>items</key>
+  <array>
+    <dict>
+      <key>cell</key><string>PSGroupCell</string>
+      <key>label</key><string>Allgemein</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSSwitchCell</string>
+      <key>label</key><string>Aktiviert</string>
+      <key>key</key><string>enabled</string>
+      <key>default</key><true/>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSGroupCell</string>
+      <key>label</key><string>Übersetzen (Apple)</string>
+      <key>footerText</key>
+      <string>Auf iOS 17 nutzt QuickTranslate die systemweite „Übersetzen“-UI (Share‑Sheet). Das ist kostenlos, benötigt keinen API‑Key und funktioniert, wenn iOS die Übersetzen‑Aktion anbietet.</string>
+    </dict>
+
+    <dict>
+      <key>cell</key><string>PSEditTextCell</string>
+      <key>label</key><string>Zielsprache (z.B. de)</string>
+      <key>key</key><string>targetLang</string>
+      <key>default</key><string>de</string>
+      <key>placeholder</key><string>de</string>
+      <key>keyboard</key><string>Alphabet</string>
+      <key>autoCaps</key><string>None</string>
+      <key>autoCorrect</key><false/>
+    </dict>
+  </array>
+</dict>
+</plist>
