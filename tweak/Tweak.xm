@@ -1,7 +1,5 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
-#import <objc/runtime.h>
-#import <NaturalLanguage/NaturalLanguage.h>
 
 static NSString * const kQTPrefsDomain = @"com.hombergerkurde.quicktranslate";
 
@@ -10,6 +8,7 @@ static inline NSDictionary *QTGetPrefs(void) {
     return [d isKindOfClass:[NSDictionary class]] ? d : @{};
 }
 
+// Accept old/new keys (enabled + Enabled)
 static inline BOOL QTEnabled(void) {
     NSDictionary *p = QTGetPrefs();
     id v = p[@"enabled"];
@@ -17,17 +16,18 @@ static inline BOOL QTEnabled(void) {
     return v ? [v boolValue] : YES;
 }
 
+// Accept old/new keys (targetLang + TargetLang)
 static inline NSString *QTTargetLang(void) {
     NSDictionary *p = QTGetPrefs();
     id v = p[@"targetLang"];
     if (!v) v = p[@"TargetLang"];
     if ([v isKindOfClass:[NSString class]] && ((NSString *)v).length > 0) return (NSString *)v;
-    return @"de"; // default
+    return @"de";
 }
 
 static inline BOOL QTIsX(void) {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier ?: @"";
-    return [bid isEqualToString:@"com.atebits.Tweetie2"];
+    return [bid isEqualToString:@"com.atebits.Tweetie2"]; // X
 }
 
 static UIWindow *QTGetKeyWindow(void) {
@@ -46,8 +46,13 @@ static UIWindow *QTGetKeyWindow(void) {
             UIWindowScene *ws = (UIWindowScene *)scene;
             if (ws.windows.count > 0) return ws.windows.firstObject;
         }
+        return nil;
     }
-    return nil;
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return app.keyWindow ?: app.windows.firstObject;
+#pragma clang diagnostic pop
 }
 
 static UIViewController *QTTopVC(UIViewController *vc) {
@@ -73,29 +78,27 @@ static void QTAlert(NSString *title, NSString *msg) {
     });
 }
 
-static NSString *QTDecodeHTML(NSString *s) {
-    if (![s isKindOfClass:[NSString class]] || s.length == 0) return s ?: @"";
-    NSData *data = [s dataUsingEncoding:NSUTF8StringEncoding];
-    if (!data) return s;
+static void QTShowResult(NSString *original, NSString *translated) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *w = QTGetKeyWindow();
+        if (!w) return;
+        UIViewController *top = QTTopVC(w.rootViewController);
+        if (!top) return;
 
-    NSDictionary *opt = @{
-        NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType,
-        NSCharacterEncodingDocumentAttribute: @(NSUTF8StringEncoding)
-    };
-    NSAttributedString *attr = [[NSAttributedString alloc] initWithData:data options:opt documentAttributes:nil error:nil];
-    return attr.string ?: s;
-}
+        NSString *msg = translated ?: @"(leer)";
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Übersetzung"
+                                                                    message:msg
+                                                             preferredStyle:UIAlertControllerStyleAlert];
 
-static NSString *QTDecodeWeird(NSString *s) {
-    if (![s isKindOfClass:[NSString class]] || s.length == 0) return s ?: @"";
-    // 1) Percent decode (fixes %D9%83...)
-    NSString *p = [s stringByRemovingPercentEncoding];
-    if (!p) p = s;
-    // 2) HTML entities decode
-    p = QTDecodeHTML(p);
-    // 3) Trim
-    p = [p stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    return p;
+        [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *a) {
+            if (translated.length) UIPasteboard.generalPasteboard.string = translated;
+        }]];
+
+        [ac addAction:[UIAlertAction actionWithTitle:@"Schließen" style:UIAlertActionStyleCancel handler:nil]];
+        [top presentViewController:ac animated:YES completion:nil];
+    });
 }
 
 #pragma mark - Text extraction
@@ -109,7 +112,7 @@ static BOOL QTLooksLikeText(NSString *s) {
 }
 
 static void QTCollectText(UIView *v, NSMutableArray<NSString *> *out, NSInteger depth) {
-    if (!v || depth > 18) return;
+    if (!v || depth > 20) return;
     if (!v.window || v.hidden || v.alpha < 0.01) return;
 
     NSString *text = nil;
@@ -129,78 +132,59 @@ static NSString *QTBestTextFromContainer(UIView *container) {
     NSMutableArray<NSString *> *chunks = [NSMutableArray new];
     QTCollectText(container, chunks, 0);
 
+    // Prefer the longest chunk, but avoid tiny UI strings if we can.
     NSString *best = @"";
     for (NSString *s in chunks) if (s.length > best.length) best = s;
 
-    if (best.length < 20 && chunks.count > 1) {
-        NSMutableOrderedSet<NSString *> *uniq = [NSMutableOrderedSet orderedSetWithArray:chunks];
+    // If we only got "username" etc, join a few unique chunks.
+    if (best.length < 40 && chunks.count > 1) {
+        NSMutableOrderedSet<NSString *> *uniq = [NSMutableOrderedSet orderedSet];
+        for (NSString *s in chunks) {
+            if (s.length < 2) continue;
+            [uniq addObject:s];
+            if (uniq.count >= 8) break;
+        }
         NSString *joined = [[uniq array] componentsJoinedByString:@"\n"];
         joined = [joined stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (joined.length > best.length) best = joined;
     }
 
     best = [best stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (best.length > 2000) best = [best substringToIndex:2000];
+    if (best.length > 2500) best = [best substringToIndex:2500];
     return best;
 }
 
-#pragma mark - Language detect (SRC) + normalize
+#pragma mark - Language helpers
 
-static NSString *QTNormalizeLang(NSString *code) {
-    if (![code isKindOfClass:[NSString class]] || code.length == 0) return @"en";
-    NSString *c = [code lowercaseString];
+static NSString *QTNormalizeLang(NSString *lang) {
+    if (![lang isKindOfClass:[NSString class]] || lang.length < 2) return nil;
 
-    // NaturalLanguage can return "und"
-    if ([c isEqualToString:@"und"]) return @"en";
+    // "en-US" -> "en"
+    NSString *l = [[lang lowercaseString] componentsSeparatedByString:@"-"].firstObject;
+    if (l.length < 2) return nil;
 
-    // keep only primary subtag (e.g. "zh-Hans" -> "zh")
-    NSArray *parts = [c componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"-_"]];
-    NSString *p0 = parts.count ? parts[0] : c;
-    if (p0.length >= 2) return [p0 substringToIndex:2];
-    return @"en";
+    // Some Apple tags can return "zh-Hans" etc.
+    if ([l isEqualToString:@"zh"]) return @"zh-CN";
+    return l;
 }
 
-static NSString *QTDetectSourceLang(NSString *text) {
-    NSString *t = [text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (t.length < 2) return @"en";
+static NSString *QTDominantLangForString(NSString *s) {
+    if (![s isKindOfClass:[NSString class]] || s.length < 4) return nil;
 
-    if (@available(iOS 12.0, *)) {
-        NLLanguageRecognizer *rec = [NLLanguageRecognizer new];
-        [rec processString:t];
-        NSString *dom = rec.dominantLanguage;
-        if ([dom isKindOfClass:[NSString class]] && dom.length > 0) {
-            return QTNormalizeLang(dom);
-        }
-    }
-    return @"en";
+    // Public API, no objc_msgSend needed
+    NSString *lang = [NSLinguisticTagger dominantLanguageForString:s];
+    return QTNormalizeLang(lang);
 }
 
-#pragma mark - UI Result
+#pragma mark - REAL translation (MyMemory - free, no API key)
 
-static void QTShowResult(NSString *translated) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *w = QTGetKeyWindow();
-        if (!w) return;
-        UIViewController *top = QTTopVC(w.rootViewController);
-        if (!top) return;
-
-        NSString *msg = translated.length ? translated : @"(leer)";
-        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Übersetzung"
-                                                                    message:msg
-                                                             preferredStyle:UIAlertControllerStyleAlert];
-
-        [ac addAction:[UIAlertAction actionWithTitle:@"Kopieren"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *a) {
-            if (msg.length) UIPasteboard.generalPasteboard.string = msg;
-        }]];
-
-        [ac addAction:[UIAlertAction actionWithTitle:@"Schließen" style:UIAlertActionStyleCancel handler:nil]];
-        [top presentViewController:ac animated:YES completion:nil];
-    });
+static NSString *QTURLEncode(NSString *s) {
+    if (!s) return @"";
+    // URLQueryAllowedCharacterSet still leaves '&' and '+' sometimes; remove them from allowed.
+    NSMutableCharacterSet *allowed = [[NSCharacterSet URLQueryAllowedCharacterSet] mutableCopy];
+    [allowed removeCharactersInString:@"&+=?"];
+    return [s stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
 }
-
-#pragma mark - MyMemory translate (no key)
 
 static void QTTranslateMyMemory(NSString *text) {
     NSString *trim = [text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -210,25 +194,31 @@ static void QTTranslateMyMemory(NSString *text) {
     }
 
     NSString *to = QTNormalizeLang(QTTargetLang());
-    if (to.length < 2) to = @"de";
+    if (!to) to = @"de";
 
-    NSString *src = QTDetectSourceLang(trim);
-    if ([src isEqualToString:to]) src = @"en"; // avoid same-lang issues
+    // MyMemory does NOT accept "auto" as source -> detect locally
+    NSString *from = QTDominantLangForString(trim);
+    if (!from) from = @"en";
+    if ([from isEqualToString:to]) {
+        // If already in target language, still translate via "en" so we get something (or show hint)
+        // Better UX: just show original
+        QTShowResult(trim, trim);
+        return;
+    }
 
-    NSURLComponents *c = [NSURLComponents componentsWithString:@"https://api.mymemory.translated.net/get"];
-    c.queryItems = @[
-        [NSURLQueryItem queryItemWithName:@"q" value:trim],
-        [NSURLQueryItem queryItemWithName:@"langpair" value:[NSString stringWithFormat:@"%@|%@", src, to]]
-    ];
+    NSString *q = QTURLEncode(trim);
+    NSString *urlStr = [NSString stringWithFormat:
+                        @"https://api.mymemory.translated.net/get?q=%@&langpair=%@|%@",
+                        q, QTURLEncode(from), QTURLEncode(to)];
 
-    NSURL *url = c.URL;
+    NSURL *url = [NSURL URLWithString:urlStr];
     if (!url) {
         QTAlert(@"QuickTranslate", @"Ungültige URL.");
         return;
     }
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-    req.timeoutInterval = 12.0;
+    req.timeoutInterval = 15.0;
     [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
 
     NSURLSessionDataTask *task =
@@ -253,41 +243,29 @@ static void QTTranslateMyMemory(NSString *text) {
         }
 
         NSDictionary *dict = (NSDictionary *)json;
-
-        // Primary path
-        NSString *translated = nil;
         NSDictionary *rd = dict[@"responseData"];
-        if ([rd isKindOfClass:[NSDictionary class]]) {
-            id tt = rd[@"translatedText"];
-            if ([tt isKindOfClass:[NSString class]]) translated = (NSString *)tt;
-        }
+        NSString *translated = nil;
+        if ([rd isKindOfClass:[NSDictionary class]]) translated = rd[@"translatedText"];
 
-        // Fallback path (sometimes in matches)
-        if (translated.length == 0) {
-            NSArray *matches = dict[@"matches"];
-            if ([matches isKindOfClass:[NSArray class]] && matches.count) {
-                id m0 = matches.firstObject;
-                if ([m0 isKindOfClass:[NSDictionary class]]) {
-                    id t2 = ((NSDictionary *)m0)[@"translation"];
-                    if ([t2 isKindOfClass:[NSString class]]) translated = (NSString *)t2;
-                }
-            }
-        }
-
-        translated = QTDecodeWeird(translated);
-
-        if (translated.length == 0) {
-            QTAlert(@"QuickTranslate", @"Übersetzung fehlgeschlagen (leer).");
+        if (![translated isKindOfClass:[NSString class]] || translated.length == 0) {
+            // Try to surface server message if present
+            NSString *msg = dict[@"responseDetails"];
+            if (![msg isKindOfClass:[NSString class]] || msg.length == 0) msg = @"Übersetzung fehlgeschlagen (leer).";
+            QTAlert(@"QuickTranslate", msg);
             return;
         }
 
-        QTShowResult(translated);
+        // Some responses can contain percent-escapes; clean them
+        NSString *clean = [translated stringByRemovingPercentEncoding];
+        if (clean.length > 0) translated = clean;
+
+        QTShowResult(trim, translated);
     }];
 
     [task resume];
 }
 
-#pragma mark - Inline globe button on X cells
+#pragma mark - Inline globe button on X post cells
 
 static char kQTInlineBtnKey;
 
@@ -305,7 +283,16 @@ static void QTConfigureGlobe(QTInlineButton *btn) {
         cfg.baseForegroundColor = UIColor.systemBlueColor;
         cfg.baseBackgroundColor = [UIColor.systemBackgroundColor colorWithAlphaComponent:0.85];
         cfg.image = [UIImage systemImageNamed:@"globe"];
+        cfg.imagePadding = 0;
         btn.configuration = cfg;
+    } else if (@available(iOS 13.0, *)) {
+        UIImageSymbolConfiguration *sc = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightSemibold];
+        UIImage *img = [UIImage systemImageNamed:@"globe" withConfiguration:sc];
+        [btn setImage:img forState:UIControlStateNormal];
+        btn.tintColor = UIColor.systemBlueColor;
+        btn.backgroundColor = [UIColor.systemBackgroundColor colorWithAlphaComponent:0.85];
+        btn.layer.cornerRadius = 14.0;
+        btn.clipsToBounds = YES;
     } else {
         [btn setTitle:@"🌐" forState:UIControlStateNormal];
     }
@@ -329,10 +316,14 @@ static UIView *QTFindHostCell(UIView *v) {
 static BOOL QTShouldAttachToContent(UIView *contentView) {
     if (!contentView || !contentView.window) return NO;
     if (contentView.hidden || contentView.alpha < 0.01) return NO;
-    if (contentView.bounds.size.height < 80) return NO;
+    if (contentView.bounds.size.height < 90) return NO;
 
     NSString *t = QTBestTextFromContainer(contentView);
-    return (t.length >= 10);
+
+    // Avoid adding button on tiny header rows like "Open Source Intel"
+    if (t.length < 60) return NO;
+
+    return YES;
 }
 
 static void QTInlineTapped(QTInlineButton *btn) {
@@ -376,6 +367,7 @@ static void QTEnsureInlineButton(UIView *contentView) {
         [contentView addSubview:btn];
     }
 
+    // bottom-left inside the cell
     CGFloat size = 28.0;
     CGFloat x = 10.0;
     CGFloat y = MAX(8.0, contentView.bounds.size.height - size - 8.0);
@@ -400,5 +392,5 @@ static void QTEnsureInlineButton(UIView *contentView) {
 %end
 
 %ctor {
-    // Preferences via PreferenceLoader; tweak reads NSUserDefaults domain.
+    // Settings is handled by PreferenceLoader; tweak reads prefs domain directly.
 }
