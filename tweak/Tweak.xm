@@ -255,7 +255,6 @@ static NSString *QTDetectLang(NSString *text) {
 static NSString *QTURLEncode(NSString *s) {
     if (!s) return @"";
     // Encode everything unsafe in query. (Important: keep it single-pass only)
-    NSCharacterSet *allowed = [[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"] invertedSet];
     // The above is inverted; we want allowed = unreserved, but easiest is using URLQueryAllowed then fixing '+'/'&' etc.
     // We'll do a safe approach using NSURLComponents instead in the request builder.
     return [s stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]] ?: @"";
