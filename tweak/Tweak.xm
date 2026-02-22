@@ -252,7 +252,7 @@ static NSString *QTDetectLang(NSString *text) {
 
 #pragma mark - REAL translation (MyMemory - free, no API key)
 
-static NSString *QTURLEncode(NSString *s) {
+__attribute__((unused)) static NSString *QTURLEncode(NSString *s) {
     if (!s) return @"";
     // Encode everything unsafe in query. (Important: keep it single-pass only)
     // The above is inverted; we want allowed = unreserved, but easiest is using URLQueryAllowed then fixing '+'/'&' etc.
